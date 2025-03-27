@@ -9,8 +9,9 @@ from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from loguru import logger
+from contextlib import asynccontextmanager
 
-from .models.context import MCPContext, ContextStore
+from .models.context import MCPContext, ContextStore, ContextManager
 from .models.messages import (
     MCPBaseMessage,
     MCPErrorMessage,
@@ -24,10 +25,27 @@ from .models.messages import (
     parse_message
 )
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPIのライフスパンイベントハンドラー
+    """
+    # スタートアップ時の処理
+    logger.info("Starting up MCP server...")
+    yield
+    # シャットダウン時の処理
+    logger.info("Shutting down MCP server...")
+
 class MCPServer:
-    def __init__(self):
-        """MCPサーバーの初期化"""
-        self.app = FastAPI(title="VoiceStudio MCP Server")
+    def __init__(self, config: Dict[str, Any]):
+        """
+        MCPサーバーの初期化
+        
+        Args:
+            config (Dict[str, Any]): サーバーの設定
+        """
+        self.config = config
+        self.app = FastAPI(lifespan=lifespan)
         self.context_store = ContextStore()
         self.functions: Dict[str, Callable[..., Awaitable[Any]]] = {}
         
@@ -35,7 +53,7 @@ class MCPServer:
         self.cleanup_task: Optional[asyncio.Task] = None
         
         # ルートの設定
-        self.setup_routes()
+        self._setup_routes()
     
     async def cleanup_loop(self):
         """期限切れコンテキストの定期的なクリーンアップ"""
@@ -61,7 +79,7 @@ class MCPServer:
         """
         self.functions[name] = func
     
-    def setup_routes(self):
+    def _setup_routes(self):
         """ルートの設定"""
         
         @self.app.on_event("startup")
@@ -81,101 +99,121 @@ class MCPServer:
                 except asyncio.CancelledError:
                     pass
         
-        @self.app.get("/")
+        @self.app.get("/health")
         async def health_check():
             """ヘルスチェックエンドポイント"""
-            return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+            return {"status": "ok"}
         
         @self.app.websocket("/mcp")
-        async def mcp_endpoint(websocket: WebSocket):
-            """MCPエンドポイント"""
+        async def websocket_endpoint(websocket: WebSocket):
+            """WebSocketエンドポイント"""
             await websocket.accept()
-            
             try:
                 while True:
-                    # メッセージの受信とパース
-                    raw_message = await websocket.receive_json()
-                    message = parse_message(raw_message)
-                    
+                    data = await websocket.receive_json()
+                    message = parse_message(data)
+
                     if isinstance(message, MCPErrorMessage):
-                        await websocket.send_json(message.dict())
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": message.error
+                        })
                         continue
-                    
-                    # メッセージタイプに応じた処理
-                    if isinstance(message, MCPContextRequest):
-                        # コンテキストの取得
-                        context = self.context_store.get(message.context_id)
-                        await websocket.send_json(MCPContextResponse(
-                            context=context.dict() if context else None
-                        ).dict())
-                    
-                    elif isinstance(message, MCPSetContextRequest):
-                        # コンテキストの設定
-                        try:
-                            context = MCPContext(
-                                context_id=message.context_id,
-                                content=message.content,
-                                scope=message.scope
-                            )
-                            if message.ttl is not None:
-                                context.update(message.content, message.ttl)
-                            
-                            self.context_store.set(context)
-                            await websocket.send_json(MCPSuccessMessage(
-                                message=f"Context {context.context_id} set successfully"
-                            ).dict())
-                        except Exception as e:
-                            await websocket.send_json(MCPErrorMessage(
-                                error=f"Failed to set context: {str(e)}"
-                            ).dict())
-                    
-                    elif isinstance(message, MCPDeleteContextRequest):
-                        # コンテキストの削除
-                        if self.context_store.delete(message.context_id):
-                            await websocket.send_json(MCPSuccessMessage(
-                                message=f"Context {message.context_id} deleted successfully"
-                            ).dict())
-                        else:
-                            await websocket.send_json(MCPErrorMessage(
-                                error=f"Context {message.context_id} not found"
-                            ).dict())
-                    
-                    elif isinstance(message, MCPFunctionCallRequest):
-                        # 関数の呼び出し
-                        func_name = message.function.name
-                        if func_name not in self.functions:
-                            await websocket.send_json(MCPErrorMessage(
-                                error=f"Function {func_name} not found"
-                            ).dict())
-                            continue
-                        
-                        try:
-                            result = await self.functions[func_name](**message.function.arguments)
-                            await websocket.send_json(MCPFunctionCallResponse(
-                                result=result
-                            ).dict())
-                        except Exception as e:
-                            await websocket.send_json(MCPFunctionCallResponse(
-                                result=None,
-                                error=str(e)
-                            ).dict())
-                    
-                    else:
-                        # 未知のメッセージタイプ
-                        await websocket.send_json(MCPErrorMessage(
-                            error=f"Unknown message type: {message.type}"
-                        ).dict())
-            
+
+                    response = await self._handle_message(message)
+                    await websocket.send_json(response)
             except WebSocketDisconnect:
                 logger.info("Client disconnected")
             except Exception as e:
-                logger.exception(f"Error in MCP endpoint: {e}")
+                logger.error(f"Error in websocket connection: {str(e)}")
+                await websocket.close()
+    
+    async def _handle_message(self, message: Any) -> Dict[str, Any]:
+        """
+        メッセージの処理
+        
+        Args:
+            message (Any): 処理するメッセージ
+        
+        Returns:
+            Dict[str, Any]: レスポンスメッセージ
+        """
+        try:
+            if message.type == "get_context":
+                context = self.context_store.get(message.context_id)
+                if context is None:
+                    return {
+                        "type": "error",
+                        "error": "Context not found"
+                    }
+                return {
+                    "type": "context",
+                    "context_id": message.context_id,
+                    "content": context.dict() if context else None
+                }
+            elif message.type == "set_context":
                 try:
-                    await websocket.send_json(MCPErrorMessage(
-                        error=f"Internal server error: {str(e)}"
-                    ).dict())
-                except:
-                    pass
+                    context = MCPContext(
+                        context_id=message.context_id,
+                        content=message.content,
+                        scope=message.scope
+                    )
+                    if message.ttl is not None:
+                        context.update(message.content, message.ttl)
+                    
+                    self.context_store.set(context)
+                    return {
+                        "type": "success",
+                        "message": f"Context {context.context_id} set successfully"
+                    }
+                except Exception as e:
+                    return {
+                        "type": "error",
+                        "error": f"Failed to set context: {str(e)}"
+                    }
+            elif message.type == "delete_context":
+                if self.context_store.delete(message.context_id):
+                    return {
+                        "type": "success",
+                        "message": f"Context {message.context_id} deleted successfully"
+                    }
+                else:
+                    return {
+                        "type": "error",
+                        "error": f"Context {message.context_id} not found"
+                    }
+            elif message.type == "function_call":
+                # 関数呼び出しの処理
+                func_name = message.function.name
+                if func_name not in self.functions:
+                    return {
+                        "type": "error",
+                        "error": f"Function {func_name} not found"
+                    }
+                
+                try:
+                    result = await self.functions[func_name](**message.function.arguments)
+                    return {
+                        "type": "function_result",
+                        "result": result
+                    }
+                except Exception as e:
+                    return {
+                        "type": "function_result",
+                        "result": None,
+                        "error": str(e)
+                    }
+            else:
+                return {
+                    "type": "error",
+                    "error": f"Unknown message type: {message.type}"
+                }
+        except Exception as e:
+            logger.error(f"Error handling message: {str(e)}")
+            return {
+                "type": "error",
+                "error": str(e)
+            }
     
     def get_app(self) -> FastAPI:
         """FastAPIアプリケーションの取得"""
