@@ -36,8 +36,15 @@ VoiceCraft-MCP-Server は以下のように動作します：
 git clone https://github.com/yourusername/VoiceCraft-MCP-Server.git
 cd VoiceCraft-MCP-Server
 
-# 依存関係のインストール
-pip install -r requirements.txt
+# uvのインストール（macOS/Linux）
+curl -sSf https://astral.sh/uv/install.sh | sh
+# または（Windows）
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 仮想環境の作成と依存パッケージのインストール
+uv venv
+source .venv/bin/activate  # または .venv\Scripts\activate（Windows）
+uv pip install -r requirements.txt
 
 # 環境変数の設定
 cp .env.example .env

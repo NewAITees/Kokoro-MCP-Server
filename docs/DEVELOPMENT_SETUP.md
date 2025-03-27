@@ -1,4 +1,3 @@
-
 このガイドでは、VoiceCraft-MCP-Server プロジェクトの開発環境をセットアップする方法を詳しく説明します。
 
 ## 前提条件
@@ -6,7 +5,7 @@
 VoiceCraft-MCP-Server の開発には以下のソフトウェアが必要です：
 
 - Python 3.8 以上
-- pip (最新版)
+- uv パッケージマネージャー
 - Git
 - Kokoro 音声合成エンジン
 
@@ -20,29 +19,32 @@ git clone https://github.com/yourusername/VoiceCraft-MCP-Server.git
 cd VoiceCraft-MCP-Server
 ```
 
-### 2. 仮想環境の作成と有効化
-
-プロジェクト専用の Python 仮想環境を作成することをお勧めします。
+### 2. uvのインストールと仮想環境の作成
 
 ```bash
+# uvのインストール（macOS/Linux）
+curl -sSf https://astral.sh/uv/install.sh | sh
+# または（Windows）
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
 # 仮想環境の作成
-python -m venv venv
+uv venv
 
 # 仮想環境の有効化（Windows）
-venv\\Scripts\\activate
+.venv\Scripts\activate
 
 # 仮想環境の有効化（macOS/Linux）
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 ### 3. 依存パッケージのインストール
 
 ```bash
 # 依存パッケージのインストール
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 
 # 開発用パッケージのインストール
-pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt
 ```
 
 ## Kokoro 音声合成エンジンのセットアップ
@@ -254,11 +256,11 @@ mypy src/
 
 ```bash
 # 仮想環境を削除して再作成
-rm -rf venv
-python -m venv venv
-source venv/bin/activate  # または venv\\Scripts\\activate (Windows)
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+rm -rf .venv
+uv venv
+source .venv/bin/activate  # または .venv\Scripts\activate (Windows)
+uv pip install -r requirements.txt
+uv pip install -r requirements-dev.txt
 ```
 
 ### 2. Kokoro エンジンの接続問題
