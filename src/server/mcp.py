@@ -11,11 +11,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from loguru import logger
 from contextlib import asynccontextmanager
 
-from .models.context import MCPContext, ContextStore, ContextManager
+from .models.context import MCPContext, ContextStore
 from .models.messages import (
     MCPBaseMessage,
     MCPErrorMessage,
     MCPSuccessMessage,
+    MCPPingMessage,
+    MCPPongMessage,
     MCPContextRequest,
     MCPContextResponse,
     MCPSetContextRequest,
@@ -37,14 +39,21 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down MCP server...")
 
 class MCPServer:
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
         MCPサーバーの初期化
         
         Args:
-            config (Dict[str, Any]): サーバーの設定
+            config (Optional[Dict[str, Any]], optional): サーバーの設定. Defaults to None.
         """
-        self.config = config
+        self.config = config or {
+            "host": "localhost",
+            "port": 8000,
+            "debug": False,
+            "log_dir": "logs",
+            "context_ttl": 3600,
+            "cleanup_interval": 60
+        }
         self.app = FastAPI(lifespan=lifespan)
         self.context_store = ContextStore()
         self.functions: Dict[str, Callable[..., Awaitable[Any]]] = {}
@@ -116,7 +125,7 @@ class MCPServer:
                     if isinstance(message, MCPErrorMessage):
                         await websocket.send_json({
                             "type": "error",
-                            "error": message.error
+                            "message": message.message
                         })
                         continue
 
@@ -139,17 +148,26 @@ class MCPServer:
             Dict[str, Any]: レスポンスメッセージ
         """
         try:
+            if isinstance(message, MCPErrorMessage):
+                return {
+                    "type": "error",
+                    "error": message.error
+                }
+            
+            if isinstance(message, MCPPingMessage):
+                return {"type": "pong"}
+            
             if message.type == "get_context":
                 context = self.context_store.get(message.context_id)
                 if context is None:
                     return {
                         "type": "error",
-                        "error": "Context not found"
+                        "message": "Context not found"
                     }
                 return {
                     "type": "context",
                     "context_id": message.context_id,
-                    "content": context.dict() if context else None
+                    "content": context.content
                 }
             elif message.type == "set_context":
                 try:
@@ -169,7 +187,7 @@ class MCPServer:
                 except Exception as e:
                     return {
                         "type": "error",
-                        "error": f"Failed to set context: {str(e)}"
+                        "message": f"Failed to set context: {str(e)}"
                     }
             elif message.type == "delete_context":
                 if self.context_store.delete(message.context_id):
@@ -180,7 +198,7 @@ class MCPServer:
                 else:
                     return {
                         "type": "error",
-                        "error": f"Context {message.context_id} not found"
+                        "message": f"Context {message.context_id} not found"
                     }
             elif message.type == "function_call":
                 # 関数呼び出しの処理
@@ -188,33 +206,49 @@ class MCPServer:
                 if func_name not in self.functions:
                     return {
                         "type": "error",
-                        "error": f"Function {func_name} not found"
+                        "message": f"Function {func_name} not found"
                     }
                 
                 try:
                     result = await self.functions[func_name](**message.function.arguments)
                     return {
-                        "type": "function_result",
+                        "type": "function_response",
                         "result": result
                     }
                 except Exception as e:
                     return {
-                        "type": "function_result",
-                        "result": None,
-                        "error": str(e)
+                        "type": "error",
+                        "message": str(e)
                     }
             else:
                 return {
                     "type": "error",
-                    "error": f"Unknown message type: {message.type}"
+                    "message": f"Unknown message type: {message.type}"
                 }
         except Exception as e:
             logger.error(f"Error handling message: {str(e)}")
             return {
                 "type": "error",
-                "error": str(e)
+                "message": str(e)
             }
     
     def get_app(self) -> FastAPI:
         """FastAPIアプリケーションの取得"""
         return self.app 
+
+    async def startup(self):
+        """サーバーの起動処理"""
+        # クリーンアップタスクの開始
+        self.cleanup_task = asyncio.create_task(self.cleanup_loop())
+        logger.info("MCP server started")
+
+    async def shutdown(self):
+        """サーバーの終了処理"""
+        # クリーンアップタスクの停止
+        if self.cleanup_task:
+            self.cleanup_task.cancel()
+            try:
+                await self.cleanup_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("MCP server stopped") 

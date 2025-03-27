@@ -12,12 +12,20 @@ class MCPBaseMessage(BaseModel):
 class MCPErrorMessage(MCPBaseMessage):
     """エラーメッセージモデル"""
     type: str = "error"
-    error: str = Field(..., description="エラーメッセージ")
+    message: str = Field(..., description="エラーメッセージ")
 
 class MCPSuccessMessage(MCPBaseMessage):
     """成功メッセージモデル"""
     type: str = "success"
-    message: str = Field(..., description="成功メッセージ")
+    message: Optional[str] = None
+
+class MCPPingMessage(MCPBaseMessage):
+    """Pingメッセージモデル"""
+    type: str = "ping"
+
+class MCPPongMessage(MCPBaseMessage):
+    """Pongメッセージモデル"""
+    type: str = "pong"
 
 class MCPContextRequest(MCPBaseMessage):
     """コンテキスト取得リクエストモデル"""
@@ -27,7 +35,8 @@ class MCPContextRequest(MCPBaseMessage):
 class MCPContextResponse(MCPBaseMessage):
     """コンテキスト取得レスポンスモデル"""
     type: str = "context"
-    context: Optional[Dict[str, Any]] = Field(None, description="コンテキスト")
+    context_id: str = Field(..., description="コンテキストID")
+    content: Dict[str, Any] = Field(..., description="コンテキストの内容")
 
 class MCPSetContextRequest(MCPBaseMessage):
     """コンテキスト設定リクエストモデル"""
@@ -54,7 +63,7 @@ class MCPFunctionCallRequest(MCPBaseMessage):
 
 class MCPFunctionCallResponse(MCPBaseMessage):
     """関数呼び出しレスポンスモデル"""
-    type: str = "function_result"
+    type: str = "function_response"
     result: Optional[Any] = Field(None, description="関数の実行結果")
     error: Optional[str] = Field(None, description="エラーメッセージ（エラー時）")
 
@@ -67,7 +76,9 @@ MESSAGE_TYPES = {
     "set_context": MCPSetContextRequest,
     "delete_context": MCPDeleteContextRequest,
     "function_call": MCPFunctionCallRequest,
-    "function_result": MCPFunctionCallResponse,
+    "function_response": MCPFunctionCallResponse,
+    "ping": MCPPingMessage,
+    "pong": MCPPongMessage,
 }
 
 def parse_message(data: Dict[str, Any]) -> Union[MCPBaseMessage, MCPErrorMessage]:
@@ -82,12 +93,12 @@ def parse_message(data: Dict[str, Any]) -> Union[MCPBaseMessage, MCPErrorMessage
     """
     try:
         if "type" not in data:
-            return MCPErrorMessage(error="Message type is required")
+            return MCPErrorMessage(message="Message type is required")
         
         message_type = data["type"]
         if message_type not in MESSAGE_TYPES:
-            return MCPErrorMessage(error=f"Unknown message type: {message_type}")
+            return MCPErrorMessage(message=f"Unknown message type: {message_type}")
         
         return MESSAGE_TYPES[message_type](**data)
     except Exception as e:
-        return MCPErrorMessage(error=f"Invalid message format: {str(e)}") 
+        return MCPErrorMessage(message=f"Validation error: {str(e)}") 
