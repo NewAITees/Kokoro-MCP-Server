@@ -1,5 +1,7 @@
 
 .env
+uv.lock
+
 
 # Python関連
 __pycache__/
