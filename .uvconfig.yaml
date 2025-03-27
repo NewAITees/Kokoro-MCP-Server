@@ -1,0 +1,8 @@
+install:
+  upgrade-strategy: eager-highest  # 常に最新バージョンにアップグレード
+  no-cache: false                 # キャッシュを利用（高速化）
+  no-deps: false                  # 依存関係もインストール
+
+venv:
+  layout: standard               # 標準レイアウト
+  python: "3.10"                 # Python 3.10以上を使用 

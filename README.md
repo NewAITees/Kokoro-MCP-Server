@@ -12,53 +12,62 @@ VoiceCraft-MCP-Server は、Claude などの AI アシスタントと連携し�
 
 AI アシスタントとの対話をより自然で豊かなものにするために、テキスト応答を音声に変換する機能は重要です。VoiceCraft-MCP-Server は、Claude などの AI アシスタントと Kokoro 音声合成エンジンを橋渡しし、シームレスな音声体験を提供します。
 
-## 仕組み
-
-VoiceCraft-MCP-Server は以下のように動作します：
-
-1. Claude などの AI アシスタントから MCP プロトコルを通じてテキスト読み上げリクエストを受信
-2. リクエストを解析し、必要に応じて言語を自動検出
-3. ローカルにインストールされた Kokoro 音声合成エンジンを呼び出し
-4. 生成された音声データを AI アシスタントに返送
-5. AI アシスタントが音声をユーザーに再生
-
 ## クイックスタート
 
 ### 前提条件
 
 - Python 3.8 以上
-- Kokoro 音声合成エンジン（ローカルにインストール済み）
+- uv パッケージマネージャー
+- Kokoro 音声合成エンジン（実モードで使用する場合）
 
 ### インストール
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/yourusername/VoiceCraft-MCP-Server.git
-cd VoiceCraft-MCP-Server
+git clone https://github.com/yourusername/VoiceStudio-MCP-Server.git
+cd VoiceStudio-MCP-Server
 
-# uvのインストール（macOS/Linux）
+# uvのインストール（まだインストールしていない場合）
+# macOS/Linux
 curl -sSf https://astral.sh/uv/install.sh | sh
-# または（Windows）
+# または Windows
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-# 仮想環境の作成と依存パッケージのインストール
-uv venv
-source .venv/bin/activate  # または .venv\Scripts\activate（Windows）
-uv pip install -r requirements.txt
+# 仮想環境の作成とパッケージのインストール
+make setup
 
 # 環境変数の設定
 cp .env.example .env
-# .env ファイルを編集して Kokoro の設定を追加
+# .env ファイルをエディタで編集して必要な設定を追加
 ```
 
 ### サーバーの起動
 
 ```bash
 # 基本的な起動
-python src/main.py
+make run
 
-# または特定のホスト/ポートを指定
-python src/main.py --host 127.0.0.1 --port 8080
+# または引数付きで起動
+uv run src.main --host 127.0.0.1 --port 8080 --debug
+
+# 開発モード（モック）での起動
+MOCK_TTS=true make run
+```
+
+### 開発者向けコマンド
+
+```bash
+# テストの実行
+make test
+
+# コードのフォーマット
+make format
+
+# リントチェック
+make lint
+
+# キャッシュとビルドファイルのクリーンアップ
+make clean
 ```
 
 ## 使用方法
