@@ -1,4 +1,4 @@
-VoiceCraft-MCP-Server は、Claude などの AI アシスタントと連携し、テキストを高品質な音声に変換する MCP (Model Context Protocol) サーバーです。Kokoro の音声合成技術を活用して、自然で表現豊かな音声を生成します。
+Kokoro-MCP-Server は、Claude などの AI アシスタントと連携し、テキストを高品質な音声に変換する MCP (Model Context Protocol) サーバーです。Kokoro の音声合成技術を活用して、自然で表現豊かな音声を生成します。
 
 ## 主な機能
 
@@ -10,7 +10,7 @@ VoiceCraft-MCP-Server は、Claude などの AI アシスタントと連携し�
 
 ## 背景
 
-AI アシスタントとの対話をより自然で豊かなものにするために、テキスト応答を音声に変換する機能は重要です。VoiceCraft-MCP-Server は、Claude などの AI アシスタントと Kokoro 音声合成エンジンを橋渡しし、シームレスな音声体験を提供します。
+AI アシスタントとの対話をより自然で豊かなものにするために、テキスト応答を音声に変換する機能は重要です。Kokoro-MCP-Server は、Claude などの AI アシスタントと Kokoro 音声合成エンジンを橋渡しし、シームレスな音声体験を提供します。
 
 ## クイックスタート
 
@@ -24,8 +24,8 @@ AI アシスタントとの対話をより自然で豊かなものにするた�
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/yourusername/VoiceStudio-MCP-Server.git
-cd VoiceStudio-MCP-Server
+git clone https://github.com/yourusername/Kokoro-MCP-Server.git
+cd Kokoro-MCP-Server
 
 # uvのインストール（まだインストールしていない場合）
 # macOS/Linux
@@ -44,12 +44,9 @@ cp .env.example .env
 ### サーバーの起動
 
 ```bash
-# 基本的な起動
-make run
 
 # または引数付きで起動
-uv run src.main --host 127.0.0.1 --port 8080 --debug
-
+uv run kokoro-MCP-server
 # 開発モード（モック）での起動
 MOCK_TTS=true make run
 ```
@@ -129,6 +126,10 @@ VoiceCraft-MCP-Server/
 ## ライセンス
 
 このプロジェクトは [MIT ライセンス](LICENSE) の下で公開されています。
+
+## サードパーティライセンス
+
+このプロジェクトで使用しているサードパーティライブラリのライセンス情報については、[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
 
 ## 謝辞
 
