@@ -3,6 +3,9 @@ import json
 import logging
 import asyncio
 import base64
+import subprocess
+import sys
+import platform
 from typing import Any, Dict, List, Optional, Sequence
 from dotenv import load_dotenv
 from mcp.server import Server
@@ -20,25 +23,206 @@ load_dotenv()
 
 # ログの準備
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("voicestudio-server")
+logger = logging.getLogger("kokoro-mcp-server")
+
+# 自動セットアップ関数
+def setup_dependencies():
+    """
+    必要な依存関係を自動的にセットアップする関数
+    
+    Returns:
+        bool: セットアップが成功したかどうか
+    """
+    logger.info("依存関係の自動セットアップを開始します...")
+    
+    success = True
+    success &= setup_mecab()
+    success &= setup_fugashi()
+    
+    logger.info("依存関係の自動セットアップが完了しました")
+    return success
+
+def setup_mecab() -> bool:
+    """
+    MeCabのセットアップを行う
+    
+    Returns:
+        bool: セットアップが成功したかどうか
+    """
+    os_name = platform.system().lower()
+    if os_name != 'linux':
+        logger.warning(f"未サポートのOS: {os_name}")
+        return False
+        
+    mecabrc_path = find_mecab_config()
+    if not mecabrc_path:
+        mecabrc_path = install_mecab()
+        
+    if not mecabrc_path:
+        logger.error("MeCabのセットアップに失敗しました")
+        return False
+        
+    return create_mecab_symlink(mecabrc_path)
+
+def find_mecab_config() -> Optional[str]:
+    """
+    MeCabの設定ファイルを探索する
+    
+    Returns:
+        Optional[str]: 設定ファイルのパス。見つからない場合はNone
+    """
+    possible_paths = [
+        '/etc/mecabrc',
+        '/usr/local/etc/mecabrc',
+        '/usr/lib/x86_64-linux-gnu/mecab/etc/mecabrc',
+        '/usr/share/mecab/mecabrc'
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            logger.info(f"MeCabの設定ファイルを発見: {path}")
+            return path
+    return None
+
+def install_mecab() -> Optional[str]:
+    """
+    MeCabとIPAdicをインストールする
+    
+    Returns:
+        Optional[str]: インストール後の設定ファイルのパス。失敗時はNone
+    """
+    try:
+        logger.info("MeCabとIPAdicをインストールします...")
+        subprocess.run(["sudo", "apt-get", "update"], check=True)
+        subprocess.run(
+            ["sudo", "apt-get", "install", "-y", "mecab", "libmecab-dev", "mecab-ipadic-utf8"],
+            check=True
+        )
+        return find_mecab_config()
+    except subprocess.SubprocessError as e:
+        logger.error(f"MeCabのインストールに失敗しました: {e}")
+        return None
+
+def create_mecab_symlink(mecabrc_path: str) -> bool:
+    """
+    MeCabの設定ファイルのシンボリックリンクを作成する
+    
+    Args:
+        mecabrc_path: 設定ファイルのパス
+        
+    Returns:
+        bool: 成功したかどうか
+    """
+    os.environ['MECABRC'] = mecabrc_path
+    
+    if os.path.exists('/usr/local/etc/mecabrc'):
+        return True
+        
+    try:
+        os.makedirs('/usr/local/etc', exist_ok=True)
+        try:
+            os.symlink(mecabrc_path, '/usr/local/etc/mecabrc')
+        except PermissionError:
+            subprocess.run(
+                ["sudo", "ln", "-sf", mecabrc_path, "/usr/local/etc/mecabrc"],
+                check=True
+            )
+        logger.info("MeCabの設定ファイルのシンボリックリンクを作成しました")
+        return True
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.error(f"シンボリックリンクの作成に失敗しました: {e}")
+        return False
+
+def setup_fugashi() -> bool:
+    """
+    fugashiと関連する日本語辞書をセットアップする
+    
+    Returns:
+        bool: セットアップが成功したかどうか
+    """
+    try:
+        logger.info("fugashiと関連パッケージをインストールします...")
+        
+        # 既存のパッケージをアンインストール
+        subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "-y", "fugashi", "ipadic"],
+            stderr=subprocess.PIPE
+        )
+        
+        # 必要なパッケージをインストール
+        packages = [
+            "fugashi[unidic]",
+            "unidic-lite",
+            "ipadic"  # オプショナル
+        ]
+        
+        for package in packages:
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", package],
+                    check=True
+                )
+            except subprocess.SubprocessError as e:
+                if package == "ipadic":
+                    logger.info("ipadicのインストールに失敗しましたが、unidic-liteが利用可能です")
+                else:
+                    raise e
+        
+        # GenericTaggerのフォールバックを有効化
+        os.environ['FUGASHI_ENABLE_FALLBACK'] = '1'
+        
+        logger.info("日本語辞書とfugashiのインストールが完了しました")
+        return True
+        
+    except subprocess.SubprocessError as e:
+        logger.error(f"fugashiと辞書のインストールに失敗しました: {e}")
+        return False
 
 # 出力ディレクトリの設定
 OUTPUT_DIR = "output"
 AUDIO_DIR = os.path.join(OUTPUT_DIR, "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
+# 依存関係のセットアップを実行
+setup_dependencies()
+
 # サーバの準備
-app = Server("voicestudio-server")
+app = Server("kokoro-mcp-server")
 
 # TTSサービスの初期化
-if os.getenv("MOCK_TTS", "false").lower() in ("true", "1", "yes"):
-    from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
-    kokoro_service = MockKokoroTTSService()
-    logger.info("Using MOCK TTS service")
-else:
-    from kokoro_mcp_server.kokoro.kokoro import KokoroTTSService
-    kokoro_service = KokoroTTSService()
-    logger.info("Using real Kokoro TTS service")
+try:
+    if os.getenv("MOCK_TTS", "false").lower() in ("true", "1", "yes"):
+        from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
+        kokoro_service = MockKokoroTTSService()
+        logger.info("Using MOCK TTS service")
+    else:
+        from kokoro_mcp_server.kokoro.kokoro import KokoroTTSService
+        kokoro_service = KokoroTTSService()
+        logger.info("Using real Kokoro TTS service")
+except ImportError as e:
+    logger.error(f"TTSサービスの初期化に失敗しました: {e}")
+    logger.info("必要なパッケージをインストールします...")
+    
+    # PyOpenJTalkのインストールに失敗した場合の対応
+    try:
+        # 環境変数を設定してインストール
+        env = os.environ.copy()
+        env['CMAKE_POLICY_VERSION_MINIMUM'] = '3.5'
+        subprocess.run([sys.executable, "-m", "pip", "install", "pyopenjtalk"], env=env, check=True)
+        
+        # 再度インポート試行
+        if os.getenv("MOCK_TTS", "false").lower() in ("true", "1", "yes"):
+            from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
+            kokoro_service = MockKokoroTTSService()
+        else:
+            from kokoro_mcp_server.kokoro.kokoro import KokoroTTSService
+            kokoro_service = KokoroTTSService()
+    except Exception as e:
+        logger.error(f"自動インストールにも失敗しました: {e}")
+        # フォールバックとしてモックサービスを使用
+        from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
+        kokoro_service = MockKokoroTTSService()
+        logger.warning("TTSサービスの初期化に失敗したため、MOCKサービスを使用します")
 
 # 利用可能な音声の一覧を取得する関数
 def list_available_voices() -> List[str]:

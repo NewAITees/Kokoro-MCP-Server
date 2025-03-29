@@ -44,11 +44,17 @@ cp .env.example .env
 ### サーバーの起動
 
 ```bash
+# モックモードで実行（Kokoroパッケージがインストールされていない環境向け）
+MOCK_TTS=true python -m kokoro_mcp_server
 
-# または引数付きで起動
-uv run kokoro-MCP-server
-# 開発モード（モック）での起動
-MOCK_TTS=true make run
+# または
+MOCK_TTS=true python src/main.py
+
+# 実モードで実行（Kokoroパッケージがインストールされている環境向け）
+python -m kokoro_mcp_server
+
+# または
+python src/main.py
 ```
 
 ### 開発者向けコマンド
@@ -125,11 +131,21 @@ VoiceCraft-MCP-Server/
 
 ## ライセンス
 
+
 このプロジェクトは [MIT ライセンス](LICENSE) の下で公開されています。
 
 ## サードパーティライセンス
 
 このプロジェクトで使用しているサードパーティライブラリのライセンス情報については、[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
+
+
+## 問題
+```bash 
+
+CMAKE_POLICY_VERSION_MINIMUM=3.5 uv add pyopenjtalk
+
+```
+
 
 ## 謝辞
 

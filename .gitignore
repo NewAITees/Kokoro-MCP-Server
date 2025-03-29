@@ -1,7 +1,13 @@
 
 .env
 uv.lock
+output/
+audio_samples/
+.venv/
+.pytest_cache/
 
+# モック関連
+mock_output/
 
 # Python関連
 __pycache__/
