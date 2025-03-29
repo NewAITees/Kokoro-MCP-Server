@@ -6,7 +6,9 @@ import base64
 import subprocess
 import sys
 import platform
-from typing import Any, Dict, List, Optional, Sequence
+import shutil
+import signal
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.types import (
@@ -17,6 +19,7 @@ from mcp.types import (
     EmbeddedResource
 )
 from pydantic import AnyUrl
+from pathlib import Path
 
 # 環境変数の読み込み
 load_dotenv()
@@ -26,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("kokoro-mcp-server")
 
 # 自動セットアップ関数
-def setup_dependencies():
+def setup_dependencies() -> bool:
     """
     必要な依存関係を自動的にセットアップする関数
     
@@ -38,6 +41,7 @@ def setup_dependencies():
     success = True
     success &= setup_mecab()
     success &= setup_fugashi()
+    success &= apply_fugashi_patch()
     
     logger.info("依存関係の自動セットアップが完了しました")
     return success
@@ -143,25 +147,21 @@ def setup_fugashi() -> bool:
     try:
         logger.info("fugashiと関連パッケージをインストールします...")
         
+        # パッケージマネージャの選択
+        pkg_manager = select_package_manager()
+        if not pkg_manager:
+            return False
+            
         # 既存のパッケージをアンインストール
-        subprocess.run(
-            [sys.executable, "-m", "pip", "uninstall", "-y", "fugashi", "ipadic"],
-            stderr=subprocess.PIPE
-        )
+        uninstall_cmd = create_package_command(pkg_manager, "uninstall", ["fugashi", "ipadic"])
+        subprocess.run(uninstall_cmd, stderr=subprocess.PIPE)
         
         # 必要なパッケージをインストール
-        packages = [
-            "fugashi[unidic]",
-            "unidic-lite",
-            "ipadic"  # オプショナル
-        ]
-        
+        packages = ["fugashi[unidic]", "unidic-lite", "ipadic"]
         for package in packages:
             try:
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "install", package],
-                    check=True
-                )
+                install_cmd = create_package_command(pkg_manager, "install", [package])
+                subprocess.run(install_cmd, check=True)
             except subprocess.SubprocessError as e:
                 if package == "ipadic":
                     logger.info("ipadicのインストールに失敗しましたが、unidic-liteが利用可能です")
@@ -178,6 +178,70 @@ def setup_fugashi() -> bool:
         logger.error(f"fugashiと辞書のインストールに失敗しました: {e}")
         return False
 
+def select_package_manager() -> Optional[str]:
+    """
+    利用可能なパッケージマネージャを選択する
+    
+    Returns:
+        Optional[str]: 選択されたパッケージマネージャ。見つからない場合はNone
+    """
+    if shutil.which("uv"):
+        return "uv"
+    elif shutil.which("pip"):
+        return "pip"
+    else:
+        logger.error("利用可能なパッケージマネージャが見つかりません")
+        return None
+
+def create_package_command(manager: str, action: str, packages: list[str]) -> list[str]:
+    """
+    パッケージ管理コマンドを生成する
+    
+    Args:
+        manager: パッケージマネージャ名
+        action: 実行するアクション（install/uninstall）
+        packages: パッケージ名のリスト
+    
+    Returns:
+        list[str]: 実行コマンドのリスト
+    """
+    if manager == "uv":
+        return ["uv", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
+    else:  # pip
+        return [sys.executable, "-m", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
+
+def apply_fugashi_patch() -> bool:
+    """
+    Fugashiライブラリにパッチを適用する
+    
+    Returns:
+        bool: パッチの適用が成功したかどうか
+    """
+    try:
+        # 必要なモジュールのインポート
+        import fugashi
+        from misaki.cutlet import Cutlet
+        
+        # Cutletクラスをモンキーパッチ
+        old_init = Cutlet.__init__
+        
+        def patched_init(self, *args, **kwargs):
+            try:
+                from fugashi import GenericTagger
+                self.tagger = GenericTagger('-Owakati')
+                logger.info("GenericTaggerを使用して初期化しました")
+            except Exception as e:
+                logger.warning(f"GenericTaggerの初期化に失敗しました: {e}")
+                old_init(self, *args, **kwargs)
+        
+        Cutlet.__init__ = patched_init
+        logger.info("Cutletクラスにパッチを適用しました")
+        return True
+        
+    except ImportError as e:
+        logger.warning(f"Fugashiライブラリが見つからないため、パッチを適用できません: {e}")
+        return False
+
 # 出力ディレクトリの設定
 OUTPUT_DIR = "output"
 AUDIO_DIR = os.path.join(OUTPUT_DIR, "audio")
@@ -189,7 +253,7 @@ setup_dependencies()
 # サーバの準備
 app = Server("kokoro-mcp-server")
 
-# TTSサービスの初期化
+# TTSサービスの初期化をより堅牢に
 try:
     if os.getenv("MOCK_TTS", "false").lower() in ("true", "1", "yes"):
         from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
@@ -326,54 +390,97 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
     Returns:
         Sequence[TextContent | ImageContent | EmbeddedResource]: ツールの実行結果
     """
-    if name == "text_to_speech":
-        text = arguments.get("text", "")
-        voice = arguments.get("voice", "jf_alpha")
-        speed = arguments.get("speed", 1.0)
-        
-        if not text:
-            return [TextContent(text="テキストが指定されていません")]
-        
-        try:
-            # 音声生成
-            success, file_path = kokoro_service.generate({
-                "text": text,
-                "voice": voice,
-                "speed": speed
-            })
+    try:
+        # 引数の型チェックを追加
+        if not isinstance(arguments, dict):
+            return [TextContent(text="Invalid arguments format")]
             
-            if success and file_path:
-                # 音声ファイルをBase64エンコード
-                with open(file_path, "rb") as f:
-                    audio_data = base64.b64encode(f.read()).decode("utf-8")
+        if name == "text_to_speech":
+            # 引数のバリデーションを追加
+            if not validate_tts_arguments(arguments):
+                return [TextContent(text="Invalid arguments for text_to_speech")]
                 
-                return [
-                    TextContent(text=f"音声を生成しました：\nファイル: {os.path.basename(file_path)}"),
-                    EmbeddedResource(
-                        uri=AnyUrl(f"file://{file_path}"),
-                        mimeType="audio/wav",
-                        data=audio_data
-                    )
-                ]
-            else:
-                return [TextContent(text="音声の生成に失敗しました")]
-                
-        except Exception as e:
-            logger.error(f"音声生成エラー: {e}", exc_info=True)
-            return [TextContent(text=f"音声の生成中にエラーが発生しました: {str(e)}")]
+            text = arguments.get("text", "")
+            voice = arguments.get("voice", "jf_alpha")
+            speed = arguments.get("speed", 1.0)
             
-    elif name == "list_voices":
-        voices = list_available_voices()
-        return [TextContent(text=f"利用可能な音声:\n{', '.join(voices)}")]
-    else:
-        return [TextContent(text=f"不明なツール: {name}")]
+            if not text:
+                return [TextContent(text="テキストが指定されていません")]
+            
+            try:
+                # 音声生成
+                success, file_path = kokoro_service.generate({
+                    "text": text,
+                    "voice": voice,
+                    "speed": speed
+                })
+                
+                if success and file_path:
+                    # 音声ファイルをBase64エンコード
+                    with open(file_path, "rb") as f:
+                        audio_data = base64.b64encode(f.read()).decode("utf-8")
+                    
+                    return [
+                        TextContent(text=f"音声を生成しました：\nファイル: {os.path.basename(file_path)}"),
+                        EmbeddedResource(
+                            uri=AnyUrl(f"file://{file_path}"),
+                            mimeType="audio/wav",
+                            data=audio_data
+                        )
+                    ]
+                else:
+                    return [TextContent(text="音声の生成に失敗しました")]
+                
+            except Exception as e:
+                logger.error(f"音声生成エラー: {e}", exc_info=True)
+                return [TextContent(text=f"音声の生成中にエラーが発生しました: {str(e)}")]
+            
+        elif name == "list_voices":
+            voices = list_available_voices()
+            return [TextContent(text=f"利用可能な音声:\n{', '.join(voices)}")]
+        else:
+            return [TextContent(text=f"不明なツール: {name}")]
+    except Exception as e:
+        logger.error(f"ツール呼び出しエラー: {e}", exc_info=True)
+        return [TextContent(text=f"ツール呼び出しエラー: {str(e)}")]
 
 async def main():
     """
     メイン関数。
     """
-    # サーバーの起動
-    await app.run()
+    try:
+        # シグナルハンドラの設定を追加
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            asyncio.get_event_loop().add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
+        
+        # 初期化オプション
+        initialization_options = {
+            "log_level": os.getenv("LOG_LEVEL", "INFO"),
+            "max_audio_size": int(os.getenv("MAX_AUDIO_SIZE", "10485760"))  # 10MB
+        }
+        
+        logger.info("Starting MCP server...")
+        
+        # 最新のMCP SDKに対応するためのstdio_server関数を使用
+        from mcp.server.stdio import stdio_server
+        
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(
+                read_stream,
+                write_stream,
+                initialization_options
+            )
+    except Exception as e:
+        logger.error(f"サーバー起動エラー: {e}", exc_info=True)
+        sys.exit(1)
+
+async def shutdown():
+    """
+    シャットダウン処理
+    """
+    logger.info("Shutting down...")
+    # クリーンアップ処理を実装
+    sys.exit(0)
 
 if __name__ == "__main__":
     # asyncioのイベントループでmain関数を実行

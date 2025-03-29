@@ -37,6 +37,7 @@ dependencies = [
     "pyopenjtalk>=0.4.0",
     "fugashi>=1.4.0",
     "mojimoji>=0.0.13",
+    "mcp>=1.5.0",
 ]
 
 [project.optional-dependencies]
