@@ -15,7 +15,7 @@ import torch
 from numpy.typing import NDArray
 from torch import Tensor
 
-from .base import BaseTTSService, TTSRequest
+from kokoro_mcp_server.kokoro.base import BaseTTSService, TTSRequest
 
 
 class KokoroTTSService(BaseTTSService):

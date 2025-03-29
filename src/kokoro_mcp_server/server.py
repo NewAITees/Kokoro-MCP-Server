@@ -14,7 +14,6 @@ from mcp.types import (
     EmbeddedResource
 )
 from pydantic import AnyUrl
-from .kokoro.kokoro import KokoroTTSService
 
 # 環境変数の読み込み
 load_dotenv()
@@ -31,8 +30,15 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 # サーバの準備
 app = Server("voicestudio-server")
 
-# Kokoro TTSサービスの初期化
-kokoro_service = KokoroTTSService()
+# TTSサービスの初期化
+if os.getenv("MOCK_TTS", "false").lower() in ("true", "1", "yes"):
+    from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
+    kokoro_service = MockKokoroTTSService()
+    logger.info("Using MOCK TTS service")
+else:
+    from kokoro_mcp_server.kokoro.kokoro import KokoroTTSService
+    kokoro_service = KokoroTTSService()
+    logger.info("Using real Kokoro TTS service")
 
 # 利用可能な音声の一覧を取得する関数
 def list_available_voices() -> List[str]:
