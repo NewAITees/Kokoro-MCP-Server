@@ -14,7 +14,7 @@ from mcp.types import (
     EmbeddedResource
 )
 from pydantic import AnyUrl
-from .kokoro import KokoroTTSService
+from .kokoro.kokoro import KokoroTTSService
 
 # 環境変数の読み込み
 load_dotenv()

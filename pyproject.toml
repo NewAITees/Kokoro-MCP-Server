@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "voicestudio-mcp-server"
+name = "kokoro-mcp-server"
 version = "0.1.0"
 description = "AI アシスタントと連携し、テキストを高品質な音声に変換する MCP サーバー"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10, <3.12"
 license = {file = "LICENSE"}
 authors = [
-    {name = "VoiceStudio-MCP-Server Contributors"}
+    {name = "kokoro-MCP-Server Contributors"}
 ]
 dependencies = [
     "websockets>=10.4",
