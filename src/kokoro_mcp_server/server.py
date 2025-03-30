@@ -18,6 +18,8 @@ from mcp.types import (
     ImageContent,
     EmbeddedResource
 )
+from mcp.server.lowlevel import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
 from pydantic import AnyUrl
 from pathlib import Path
 
@@ -54,23 +56,27 @@ def setup_mecab() -> bool:
         bool: セットアップが成功したかどうか
     """
     os_name = platform.system().lower()
-    if os_name != 'linux':
+    logger.warning(f"現在のOS: {os_name}")
+    
+    if os_name == 'linux':
+        mecabrc_path = find_mecab_config_linux()
+        if not mecabrc_path:
+            mecabrc_path = install_mecab_linux()
+            
+        if not mecabrc_path:
+            logger.error("MeCabのセットアップに失敗しました")
+            return False
+            
+        return create_mecab_symlink_linux(mecabrc_path)
+    elif os_name == 'windows':
+        return setup_mecab_windows()
+    else:
         logger.warning(f"未サポートのOS: {os_name}")
         return False
-        
-    mecabrc_path = find_mecab_config()
-    if not mecabrc_path:
-        mecabrc_path = install_mecab()
-        
-    if not mecabrc_path:
-        logger.error("MeCabのセットアップに失敗しました")
-        return False
-        
-    return create_mecab_symlink(mecabrc_path)
 
-def find_mecab_config() -> Optional[str]:
+def find_mecab_config_linux() -> Optional[str]:
     """
-    MeCabの設定ファイルを探索する
+    Linux用: MeCabの設定ファイルを探索する
     
     Returns:
         Optional[str]: 設定ファイルのパス。見つからない場合はNone
@@ -88,9 +94,9 @@ def find_mecab_config() -> Optional[str]:
             return path
     return None
 
-def install_mecab() -> Optional[str]:
+def install_mecab_linux() -> Optional[str]:
     """
-    MeCabとIPAdicをインストールする
+    Linux用: MeCabとIPAdicをインストールする
     
     Returns:
         Optional[str]: インストール後の設定ファイルのパス。失敗時はNone
@@ -102,14 +108,14 @@ def install_mecab() -> Optional[str]:
             ["sudo", "apt-get", "install", "-y", "mecab", "libmecab-dev", "mecab-ipadic-utf8"],
             check=True
         )
-        return find_mecab_config()
+        return find_mecab_config_linux()
     except subprocess.SubprocessError as e:
         logger.error(f"MeCabのインストールに失敗しました: {e}")
         return None
 
-def create_mecab_symlink(mecabrc_path: str) -> bool:
+def create_mecab_symlink_linux(mecabrc_path: str) -> bool:
     """
-    MeCabの設定ファイルのシンボリックリンクを作成する
+    Linux用: MeCabの設定ファイルのシンボリックリンクを作成する
     
     Args:
         mecabrc_path: 設定ファイルのパス
@@ -135,6 +141,54 @@ def create_mecab_symlink(mecabrc_path: str) -> bool:
         return True
     except (OSError, subprocess.SubprocessError) as e:
         logger.error(f"シンボリックリンクの作成に失敗しました: {e}")
+        return False
+
+def setup_mecab_windows() -> bool:
+    """
+    Windows用: MeCabのセットアップを行う
+    
+    Returns:
+        bool: セットアップが成功したかどうか
+    """
+    try:
+        # mecabrcファイルを作成
+        mecab_dir = Path("c:/mecab")
+        unidic_dir = Path(sys.prefix) / "Lib/site-packages/unidic/dicdir"
+        
+        # ディレクトリがなければ作成
+        mecab_dir.mkdir(exist_ok=True, parents=True)
+        
+        # パスを正規化して/を使用
+        normalized_unidic_path = str(unidic_dir).replace('\\', '/')
+        
+        mecabrc_content = f"""
+dicdir = {normalized_unidic_path}
+userdic =
+debug = 0
+maxopt = 2
+dicinfo = dic.da
+output-format-type = wakati
+"""
+        # mecabrcファイルの作成
+        with open(mecab_dir / "mecabrc", "w", encoding="utf-8") as f:
+            f.write(mecabrc_content)
+        
+        # unidic用のmecabrcファイルも作成
+        if unidic_dir.exists():
+            unidic_dir.mkdir(exist_ok=True, parents=True)
+            with open(unidic_dir / "mecabrc", "w", encoding="utf-8") as f:
+                f.write(mecabrc_content)
+        
+        # 環境変数の設定
+        os.environ['MECABRC'] = str(mecab_dir / "mecabrc")
+        
+        logger.info(f"MeCabの設定ファイルを作成しました: {mecab_dir / 'mecabrc'}")
+        if unidic_dir.exists():
+            logger.info(f"unidic用のmecabrcファイルを作成しました: {unidic_dir / 'mecabrc'}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Windowsでのmecabrcファイル作成に失敗しました: {e}")
         return False
 
 def setup_fugashi() -> bool:
@@ -206,9 +260,21 @@ def create_package_command(manager: str, action: str, packages: list[str]) -> li
         list[str]: 実行コマンドのリスト
     """
     if manager == "uv":
-        return ["uv", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
+        if platform.system().lower() == 'windows':
+            # Windows用の環境変数設定
+            if action == "install" and "pyopenjtalk" in packages:
+                return ["uv", "pip", action, "--system", "--no-cache-dir"] + packages
+            else:
+                return ["uv", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
+        else:
+            return ["uv", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
     else:  # pip
-        return [sys.executable, "-m", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
+        cmd = [sys.executable, "-m", "pip", action]
+        if action == "install":
+            cmd.append("--no-cache-dir")
+        if action == "uninstall":
+            cmd.append("-y")
+        return cmd + packages
 
 def apply_fugashi_patch() -> bool:
     """
@@ -232,6 +298,25 @@ def apply_fugashi_patch() -> bool:
                 logger.info("GenericTaggerを使用して初期化しました")
             except Exception as e:
                 logger.warning(f"GenericTaggerの初期化に失敗しました: {e}")
+                try:
+                    # Windowsの場合の追加対応
+                    if platform.system().lower() == 'windows':
+                        # MeCabのパスを確認
+                        mecabrc = os.environ.get('MECABRC', 'c:/mecab/mecabrc')
+                        unidic_dir = Path(sys.prefix) / "Lib/site-packages/unidic/dicdir"
+                        
+                        if Path(mecabrc).exists():
+                            logger.info(f"mecabrcファイルが存在します: {mecabrc}")
+                        else:
+                            logger.warning(f"mecabrcファイルが見つかりません: {mecabrc}")
+                        
+                        if unidic_dir.exists():
+                            logger.info(f"unidic辞書が存在します: {unidic_dir}")
+                        else:
+                            logger.warning(f"unidic辞書が見つかりません: {unidic_dir}")
+                except Exception as e2:
+                    logger.warning(f"パス確認中にエラーが発生: {e2}")
+                
                 old_init(self, *args, **kwargs)
         
         Cutlet.__init__ = patched_init
@@ -241,6 +326,32 @@ def apply_fugashi_patch() -> bool:
     except ImportError as e:
         logger.warning(f"Fugashiライブラリが見つからないため、パッチを適用できません: {e}")
         return False
+
+def validate_tts_arguments(arguments: dict) -> bool:
+    """
+    TTSの引数をバリデーションする
+    
+    Args:
+        arguments: 引数
+        
+    Returns:
+        bool: 有効な引数かどうか
+    """
+    if "text" not in arguments:
+        return False
+    
+    if not isinstance(arguments.get("text"), str):
+        return False
+    
+    if "voice" in arguments and not isinstance(arguments.get("voice"), str):
+        return False
+    
+    if "speed" in arguments:
+        speed = arguments.get("speed")
+        if not isinstance(speed, (int, float)) or speed < 0.5 or speed > 2.0:
+            return False
+    
+    return True
 
 # 出力ディレクトリの設定
 OUTPUT_DIR = "output"
@@ -272,7 +383,26 @@ except ImportError as e:
         # 環境変数を設定してインストール
         env = os.environ.copy()
         env['CMAKE_POLICY_VERSION_MINIMUM'] = '3.5'
-        subprocess.run([sys.executable, "-m", "pip", "install", "pyopenjtalk"], env=env, check=True)
+        
+        if platform.system().lower() == 'windows':
+            # Windowsの場合は事前ビルド済みのホイールファイルを使用
+            try:
+                # 最新のPyOpenJTalkをインストール
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--no-cache-dir", 
+                     "https://github.com/r9y9/pyopenjtalk/releases/download/v0.3.0/pyopenjtalk-0.3.0-cp39-cp39-win_amd64.whl"],
+                    env=env, check=True
+                )
+            except subprocess.SubprocessError:
+                logger.warning("事前ビルド済みのPyOpenJTalkインストールに失敗しました。環境変数を設定して再試行します。")
+                # 通常のインストールを試す
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--no-cache-dir", "pyopenjtalk"],
+                    env=env, check=True
+                )
+        else:
+            # Linux/macOSの場合は通常のインストール
+            subprocess.run([sys.executable, "-m", "pip", "install", "pyopenjtalk"], env=env, check=True)
         
         # 再度インポート試行
         if os.getenv("MOCK_TTS", "false").lower() in ("true", "1", "yes"):
@@ -450,14 +580,19 @@ async def main():
     """
     try:
         # シグナルハンドラの設定を追加
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            asyncio.get_event_loop().add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
+        if platform.system().lower() != 'windows':  # Windowsではsignalハンドラが異なる
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                asyncio.get_event_loop().add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
         
         # 初期化オプション
-        initialization_options = {
-            "log_level": os.getenv("LOG_LEVEL", "INFO"),
-            "max_audio_size": int(os.getenv("MAX_AUDIO_SIZE", "10485760"))  # 10MB
-        }
+        initialization_options = InitializationOptions(
+            server_name="kokoro-mcp-server",
+            server_version="1.0.0",
+            capabilities=app.get_capabilities(
+                notification_options=NotificationOptions(),
+                experimental_capabilities={},
+            ),
+        )
         
         logger.info("Starting MCP server...")
         

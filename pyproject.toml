@@ -37,7 +37,10 @@ dependencies = [
     "pyopenjtalk>=0.4.0",
     "fugashi>=1.4.0",
     "mojimoji>=0.0.13",
-    "mcp>=1.5.0",
+    "mcp[cli]>=1.5.0",
+    "wasabi>=1.1.3",
+    "spacy>=3.8.4",
+    "thinc>=8.3.4",
 ]
 
 [project.optional-dependencies]

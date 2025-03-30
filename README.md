@@ -24,7 +24,7 @@ AI アシスタントとの対話をより自然で豊かなものにするた�
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/yourusername/Kokoro-MCP-Server.git
+git clone https://github.com/NewAITeesKokoro-MCP-Server.git
 cd Kokoro-MCP-Server
 
 # uvのインストール（まだインストールしていない場合）
@@ -33,12 +33,33 @@ curl -sSf https://astral.sh/uv/install.sh | sh
 # または Windows
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-# 仮想環境の作成とパッケージのインストール
-make setup
+# まず、仮想環境を作成
+uv venv .venv
+
+# 仮想環境をアクティベート
+# Windowsの場合
+.\.venv\Scripts\activate
+
+
+# Hugging Face CLIをインストールして認証
+pip install huggingface_hub
+huggingface-cli login
 
 # 環境変数の設定
+
+
 cp .env.example .env
+
+# Linux系のコマンド
+CMAKE_POLICY_VERSION_MINIMUM=3.5 uv add pyopenjtalk
+
+# windows系でインストールするときのコマンド
+$env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"; uv add pyopenjtalk
+
 # .env ファイルをエディタで編集して必要な設定を追加
+
+uv run src/main.py
+
 ```
 
 ### サーバーの起動
@@ -139,12 +160,110 @@ VoiceCraft-MCP-Server/
 このプロジェクトで使用しているサードパーティライブラリのライセンス情報については、[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
 
 
-## 問題
-```bash 
+## トラブルシューティング
 
-CMAKE_POLICY_VERSION_MINIMUM=3.5 uv add pyopenjtalk
+### よくある問題と解決策
 
+#### インストール関連の問題
+
+1. **`error: アクセスが拒否されました。(os error 5)`**
+   - **原因**: パッケージのインストール時に権限の問題が発生
+   - **解決策**: 
+     ```bash
+     # 管理者権限でコマンドプロンプトかPowerShellを実行するか、
+     # 以下のようにインストールを試みる
+     uv pip install --user fugashi[unidic]
+     
+     # または一旦仮想環境を削除して再作成
+     rm -rf .venv
+     uv venv .venv
+     .\.venv\Scripts\activate
+     ```
+
+2. **PyOpenJTalkのインストールエラー**
+   - **原因**: プラットフォームの互換性やビルド環境の問題
+   - **解決策**:
+     ```bash
+     # Windowsの場合は環境変数を設定してから
+     $env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+     uv pip install pyopenjtalk
+     
+     # 上記が失敗する場合はprebuiltホイールを試す
+     uv pip install https://github.com/r9y9/pyopenjtalk/releases/download/v0.3.0/pyopenjtalk-0.3.0-cp39-cp39-win_amd64.whl
+     
+     # それでも失敗する場合はモックモードでの実行を検討
+     MOCK_TTS=true uv run src/main.py
+     ```
+
+#### 依存関係のエラー
+
+1. **`ImportError: cannot import name 'table' from 'wasabi'`**
+   - **原因**: wasabiパッケージのバージョンが互換性のないものになっている
+   - **解決策**:
+     ```bash
+     # 依存関係パッケージの適切なバージョンをインストール
+     uv pip install 'wasabi>=0.10.0' 'spacy>=3.5.0' 'thinc>=8.1.0'
+     
+     # または依存関係を一括でアップグレード
+     uv pip install --upgrade wasabi spacy thinc
+     ```
+
+2. **`ERROR:kokoro-mcp-server:Kokoro package is not installed`**
+   - **原因**: Kokoroパッケージがインストールされていないか、アクセスできない
+   - **解決策**:
+     ```bash
+     # Kokoroパッケージをインストールするか、
+     # モックモードで実行して代替の音声合成を使用
+     MOCK_TTS=true uv run src/main.py
+     ```
+
+#### サーバー起動の問題
+
+1. **タイムアウトやコネクション関連のエラー**
+   - **原因**: 起動プロセスが完了する前にクライアントからの要求があった
+   - **解決策**:
+     ```bash
+     # ログを詳細に確認
+     uv run src/main.py --log-level DEBUG
+     
+     # クライアント側でタイムアウト設定を調整
+     # または、システムリソースの使用状況を確認
+     ```
+
+### サーバーの動作モード
+
+1. **実モード** - Kokoroパッケージを使用して高品質な音声を生成
+   ```bash
+   uv run src/main.py
+   ```
+
+2. **モックモード** - Kokoroパッケージなしでもサーバーをテスト実行可能
+   ```bash
+   MOCK_TTS=true uv run src/main.py
+   ```
+
+### バージョン互換性
+
+- Python: 3.8以上必須
+- 依存ライブラリのバージョン要件:
+  - wasabi >= 0.10.0
+  - spacy >= 3.5.0 
+  - thinc >= 8.1.0
+  - fugashi + unidic
+
+### ログの確認
+
+問題診断には詳細なログを確認することをお勧めします:
+
+```bash
+# 詳細ログの有効化
+uv run src/main.py --log-level DEBUG
+
+# ログファイルへの出力
+uv run src/main.py --log-file kokoro-mcp-server.log
 ```
+
+より詳細なトラブルシューティングが必要な場合は、[Issue](https://github.com/NewAITees/Kokoro-MCP-Server/issues)を作成してください。
 
 
 ## 謝辞
