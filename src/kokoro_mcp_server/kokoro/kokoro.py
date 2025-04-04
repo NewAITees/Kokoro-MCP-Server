@@ -1,49 +1,113 @@
 """
-Kokoro TTSサービスの実装
+Kokoro TTS Service implementation
 """
 
 import logging
-from collections.abc import Generator
-from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
-
-import librosa
+from datetime import datetime
 import numpy as np
+from numpy.typing import NDArray
+import librosa
 import soundfile as sf
 import torch
-from numpy.typing import NDArray
+
 from torch import Tensor
+from typing import cast, Any, Generator, Tuple, Optional, List
+from .base import BaseTTSService, TTSRequest
 
-from kokoro_mcp_server.kokoro.base import BaseTTSService, TTSRequest
-
+logger = logging.getLogger(__name__)
 
 class KokoroTTSService(BaseTTSService):
-    """Kokoro TTSサービスの実装クラス"""
-
+    """Kokoro TTS Service implementation"""
+    
     def __init__(self):
-        """サービスの初期化"""
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.logger = logging.getLogger(__name__)
-        self.logger.info(f"KokoroTTSService initialized with device: {self.device}")
-
+        """Initialize the service"""
+        self.logger = logger
+        self.pipeline = self._create_pipeline()
+        
+    def _create_pipeline(self):
+        """Create TTS pipeline"""
         try:
-            # 日本語用のパイプラインを初期化
-            self.pipeline = self._create_pipeline(lang_code="j")
-            self.logger.info("Successfully initialized KPipeline with lang_code='j'")
+            from transformers import VitsModel, AutoTokenizer
+            
+            # モデルとトークナイザーの初期化
+            model = VitsModel.from_pretrained("facebook/mms-tts-jpn")
+            tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-jpn")
+            
+            def pipeline(
+                text: str,
+                voice: str = "jf_alpha",
+                speed: float = 1.0,
+                split_pattern: Optional[str] = None
+            ) -> Generator[Tuple[list, list, Optional[Tensor]], None, None]:
+                """
+                テキストから音声を生成するパイプライン
+                
+                Args:
+                    text: 変換するテキスト
+                    voice: 使用する音声ID
+                    speed: 音声の速度
+                    split_pattern: テキストの分割パターン
+                    
+                Yields:
+                    tuple[list, list, Optional[Tensor]]: グラフェム、音素、音声データ
+                """
+                try:
+                    # テキストのトークン化
+                    inputs = tokenizer(text, return_tensors="pt")
+                    
+                    # 音声生成
+                    with torch.no_grad():
+                        output = model(**inputs)
+                        
+                    # 音声データの取得
+                    audio = output.audio[0]
+                    
+                    # 速度調整
+                    if speed != 1.0:
+                        audio = self._adjust_speed(audio, speed)
+                        
+                    yield (
+                        output.graphemes[0],
+                        output.phonemes[0],
+                        audio
+                    )
+                    
+                except Exception as e:
+                    self.logger.error(f"Pipeline error: {e}", exc_info=True)
+                    yield [], [], None
+                    
+            return pipeline
+            
         except Exception as e:
-            self.logger.error(f"Failed to initialize KPipeline: {e}", exc_info=True)
-            raise
-
-    def _create_pipeline(self, lang_code: str):
-        """パイプラインを作成する"""
+            self.logger.error(f"Pipeline creation error: {e}", exc_info=True)
+            return None
+            
+    def _adjust_speed(self, audio: Tensor, speed: float) -> Tensor:
+        """
+        音声の速度を調整する
+        
+        Args:
+            audio: 音声データ
+            speed: 速度（0.5〜2.0）
+            
+        Returns:
+            Tensor: 速度調整後の音声データ
+        """
         try:
-            from kokoro import KPipeline
-            return KPipeline(lang_code=lang_code)
-        except ImportError:
-            self.logger.error("Kokoro package is not installed")
-            raise
-
+            # 音声データをNumPy配列に変換
+            audio_np = audio.cpu().numpy()
+            
+            # librosaを使用して速度を調整
+            audio_stretched = librosa.effects.time_stretch(audio_np, rate=1/speed)
+            
+            # テンソルに戻す
+            return torch.from_numpy(audio_stretched)
+            
+        except Exception as e:
+            self.logger.error(f"Speed adjustment error: {e}", exc_info=True)
+            return audio
+            
     def generate(self, request: TTSRequest) -> tuple[bool, str | None]:
         """音声を生成する
 

@@ -1,3 +1,7 @@
+"""
+Kokoro MCP Server implementation
+"""
+
 import os
 import json
 import logging
@@ -8,19 +12,9 @@ import sys
 import platform
 import shutil
 import signal
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from dotenv import load_dotenv
-from mcp.server import Server
-from mcp.types import (
-    Resource,
-    Tool,
-    TextContent,
-    ImageContent,
-    EmbeddedResource
-)
-from mcp.server.lowlevel import NotificationOptions, Server
-from mcp.server.models import InitializationOptions
-from pydantic import AnyUrl
+from mcp.server.fastmcp import FastMCP, Context, Image
 from pathlib import Path
 
 # 環境変数の読み込み
@@ -56,27 +50,23 @@ def setup_mecab() -> bool:
         bool: セットアップが成功したかどうか
     """
     os_name = platform.system().lower()
-    logger.warning(f"現在のOS: {os_name}")
-    
-    if os_name == 'linux':
-        mecabrc_path = find_mecab_config_linux()
-        if not mecabrc_path:
-            mecabrc_path = install_mecab_linux()
-            
-        if not mecabrc_path:
-            logger.error("MeCabのセットアップに失敗しました")
-            return False
-            
-        return create_mecab_symlink_linux(mecabrc_path)
-    elif os_name == 'windows':
-        return setup_mecab_windows()
-    else:
+    if os_name != 'linux':
         logger.warning(f"未サポートのOS: {os_name}")
         return False
+        
+    mecabrc_path = find_mecab_config()
+    if not mecabrc_path:
+        mecabrc_path = install_mecab()
+        
+    if not mecabrc_path:
+        logger.error("MeCabのセットアップに失敗しました")
+        return False
+        
+    return create_mecab_symlink(mecabrc_path)
 
-def find_mecab_config_linux() -> Optional[str]:
+def find_mecab_config() -> Optional[str]:
     """
-    Linux用: MeCabの設定ファイルを探索する
+    MeCabの設定ファイルを探索する
     
     Returns:
         Optional[str]: 設定ファイルのパス。見つからない場合はNone
@@ -94,9 +84,9 @@ def find_mecab_config_linux() -> Optional[str]:
             return path
     return None
 
-def install_mecab_linux() -> Optional[str]:
+def install_mecab() -> Optional[str]:
     """
-    Linux用: MeCabとIPAdicをインストールする
+    MeCabとIPAdicをインストールする
     
     Returns:
         Optional[str]: インストール後の設定ファイルのパス。失敗時はNone
@@ -108,14 +98,14 @@ def install_mecab_linux() -> Optional[str]:
             ["sudo", "apt-get", "install", "-y", "mecab", "libmecab-dev", "mecab-ipadic-utf8"],
             check=True
         )
-        return find_mecab_config_linux()
+        return find_mecab_config()
     except subprocess.SubprocessError as e:
         logger.error(f"MeCabのインストールに失敗しました: {e}")
         return None
 
-def create_mecab_symlink_linux(mecabrc_path: str) -> bool:
+def create_mecab_symlink(mecabrc_path: str) -> bool:
     """
-    Linux用: MeCabの設定ファイルのシンボリックリンクを作成する
+    MeCabの設定ファイルのシンボリックリンクを作成する
     
     Args:
         mecabrc_path: 設定ファイルのパス
@@ -143,54 +133,6 @@ def create_mecab_symlink_linux(mecabrc_path: str) -> bool:
         logger.error(f"シンボリックリンクの作成に失敗しました: {e}")
         return False
 
-def setup_mecab_windows() -> bool:
-    """
-    Windows用: MeCabのセットアップを行う
-    
-    Returns:
-        bool: セットアップが成功したかどうか
-    """
-    try:
-        # mecabrcファイルを作成
-        mecab_dir = Path("c:/mecab")
-        unidic_dir = Path(sys.prefix) / "Lib/site-packages/unidic/dicdir"
-        
-        # ディレクトリがなければ作成
-        mecab_dir.mkdir(exist_ok=True, parents=True)
-        
-        # パスを正規化して/を使用
-        normalized_unidic_path = str(unidic_dir).replace('\\', '/')
-        
-        mecabrc_content = f"""
-dicdir = {normalized_unidic_path}
-userdic =
-debug = 0
-maxopt = 2
-dicinfo = dic.da
-output-format-type = wakati
-"""
-        # mecabrcファイルの作成
-        with open(mecab_dir / "mecabrc", "w", encoding="utf-8") as f:
-            f.write(mecabrc_content)
-        
-        # unidic用のmecabrcファイルも作成
-        if unidic_dir.exists():
-            unidic_dir.mkdir(exist_ok=True, parents=True)
-            with open(unidic_dir / "mecabrc", "w", encoding="utf-8") as f:
-                f.write(mecabrc_content)
-        
-        # 環境変数の設定
-        os.environ['MECABRC'] = str(mecab_dir / "mecabrc")
-        
-        logger.info(f"MeCabの設定ファイルを作成しました: {mecab_dir / 'mecabrc'}")
-        if unidic_dir.exists():
-            logger.info(f"unidic用のmecabrcファイルを作成しました: {unidic_dir / 'mecabrc'}")
-        
-        return True
-    except Exception as e:
-        logger.error(f"Windowsでのmecabrcファイル作成に失敗しました: {e}")
-        return False
-
 def setup_fugashi() -> bool:
     """
     fugashiと関連する日本語辞書をセットアップする
@@ -205,6 +147,17 @@ def setup_fugashi() -> bool:
         pkg_manager = select_package_manager()
         if not pkg_manager:
             return False
+        
+        # Windowsの場合はインストールをスキップするオプション    
+        if platform.system().lower() == 'windows':
+            try:
+                # 既にインストールされているか確認
+                import fugashi
+                logger.info("fugashiはすでにインストールされています")
+                return True
+            except ImportError:
+                # インストールを試みる
+                pass
             
         # 既存のパッケージをアンインストール
         uninstall_cmd = create_package_command(pkg_manager, "uninstall", ["fugashi", "ipadic"])
@@ -239,7 +192,10 @@ def select_package_manager() -> Optional[str]:
     Returns:
         Optional[str]: 選択されたパッケージマネージャ。見つからない場合はNone
     """
-    if shutil.which("uv"):
+    if platform.system().lower() == 'windows':
+        # Windows環境では通常pipを使う
+        return "pip"
+    elif shutil.which("uv"):
         return "uv"
     elif shutil.which("pip"):
         return "pip"
@@ -260,21 +216,9 @@ def create_package_command(manager: str, action: str, packages: list[str]) -> li
         list[str]: 実行コマンドのリスト
     """
     if manager == "uv":
-        if platform.system().lower() == 'windows':
-            # Windows用の環境変数設定
-            if action == "install" and "pyopenjtalk" in packages:
-                return ["uv", "pip", action, "--system", "--no-cache-dir"] + packages
-            else:
-                return ["uv", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
-        else:
-            return ["uv", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
+        return ["uv", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
     else:  # pip
-        cmd = [sys.executable, "-m", "pip", action]
-        if action == "install":
-            cmd.append("--no-cache-dir")
-        if action == "uninstall":
-            cmd.append("-y")
-        return cmd + packages
+        return [sys.executable, "-m", "pip", action] + (["-y"] if action == "uninstall" else []) + packages
 
 def apply_fugashi_patch() -> bool:
     """
@@ -286,71 +230,68 @@ def apply_fugashi_patch() -> bool:
     try:
         # 必要なモジュールのインポート
         import fugashi
-        from misaki.cutlet import Cutlet
-        
-        # Cutletクラスをモンキーパッチ
-        old_init = Cutlet.__init__
-        
-        def patched_init(self, *args, **kwargs):
-            try:
-                from fugashi import GenericTagger
-                self.tagger = GenericTagger('-Owakati')
-                logger.info("GenericTaggerを使用して初期化しました")
-            except Exception as e:
-                logger.warning(f"GenericTaggerの初期化に失敗しました: {e}")
+        try:
+            from misaki.cutlet import Cutlet
+            
+            # Cutletクラスをモンキーパッチ
+            old_init = Cutlet.__init__
+            
+            def patched_init(self, *args, **kwargs):
                 try:
-                    # Windowsの場合の追加対応
-                    if platform.system().lower() == 'windows':
-                        # MeCabのパスを確認
-                        mecabrc = os.environ.get('MECABRC', 'c:/mecab/mecabrc')
-                        unidic_dir = Path(sys.prefix) / "Lib/site-packages/unidic/dicdir"
-                        
-                        if Path(mecabrc).exists():
-                            logger.info(f"mecabrcファイルが存在します: {mecabrc}")
-                        else:
-                            logger.warning(f"mecabrcファイルが見つかりません: {mecabrc}")
-                        
-                        if unidic_dir.exists():
-                            logger.info(f"unidic辞書が存在します: {unidic_dir}")
-                        else:
-                            logger.warning(f"unidic辞書が見つかりません: {unidic_dir}")
-                except Exception as e2:
-                    logger.warning(f"パス確認中にエラーが発生: {e2}")
-                
-                old_init(self, *args, **kwargs)
-        
-        Cutlet.__init__ = patched_init
-        logger.info("Cutletクラスにパッチを適用しました")
-        return True
-        
+                    from fugashi import GenericTagger
+                    self.tagger = GenericTagger('-Owakati')
+                    logger.info("GenericTaggerを使用して初期化しました")
+                except Exception as e:
+                    logger.warning(f"GenericTaggerの初期化に失敗しました: {e}")
+                    old_init(self, *args, **kwargs)
+            
+            Cutlet.__init__ = patched_init
+            logger.info("Cutletクラスにパッチを適用しました")
+            return True
+        except ImportError as e:
+            logger.warning(f"misaki.cutletモジュールが見つかりません: {e}")
+            # misakiパッケージのインストールを試みる
+            try:
+                pkg_manager = select_package_manager()
+                if pkg_manager:
+                    install_cmd = create_package_command(pkg_manager, "install", ["misaki-cutlet"])
+                    subprocess.run(install_cmd, check=True)
+                    logger.info("misaki-cutletのインストールに成功しました")
+                    # 再度インポート試行
+                    from misaki.cutlet import Cutlet
+                    return apply_fugashi_patch()  # 再帰的に試行
+                return False
+            except Exception as e2:
+                logger.warning(f"misaki-cutletのインストールに失敗しました: {e2}")
+                return False
     except ImportError as e:
         logger.warning(f"Fugashiライブラリが見つからないため、パッチを適用できません: {e}")
         return False
 
+# 引数検証関数
 def validate_tts_arguments(arguments: dict) -> bool:
     """
-    TTSの引数をバリデーションする
+    TTS引数を検証する
     
     Args:
-        arguments: 引数
+        arguments: 検証する引数
         
     Returns:
-        bool: 有効な引数かどうか
+        bool: 引数が有効かどうか
     """
-    if "text" not in arguments:
+    # 必須項目
+    if "text" not in arguments or not isinstance(arguments["text"], str):
         return False
-    
-    if not isinstance(arguments.get("text"), str):
+        
+    # オプション項目
+    if "voice" in arguments and not isinstance(arguments["voice"], str):
         return False
-    
-    if "voice" in arguments and not isinstance(arguments.get("voice"), str):
-        return False
-    
+        
     if "speed" in arguments:
-        speed = arguments.get("speed")
+        speed = arguments["speed"]
         if not isinstance(speed, (int, float)) or speed < 0.5 or speed > 2.0:
             return False
-    
+            
     return True
 
 # 出力ディレクトリの設定
@@ -361,17 +302,38 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 # 依存関係のセットアップを実行
 setup_dependencies()
 
-# サーバの準備
-app = Server("kokoro-mcp-server")
+# サーバーの準備
+mcp = FastMCP("kokoro-mcp-server")
 
 # TTSサービスの初期化をより堅牢に
 try:
     if os.getenv("MOCK_TTS", "false").lower() in ("true", "1", "yes"):
         from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
+        from kokoro_mcp_server.kokoro.base import TTSRequest
         kokoro_service = MockKokoroTTSService()
         logger.info("Using MOCK TTS service")
     else:
+        # 依存パッケージのインストールを試みる
+        try:
+            import torch
+            import librosa
+            import soundfile
+        except ImportError:
+            logger.info("必要な依存パッケージをインストールします...")
+            pkg_manager = select_package_manager()
+            if pkg_manager:
+                packages = ["torch", "librosa", "soundfile", "numpy"]
+                for package in packages:
+                    try:
+                        install_cmd = create_package_command(pkg_manager, "install", [package])
+                        subprocess.run(install_cmd, check=True)
+                        logger.info(f"{package}のインストールに成功しました")
+                    except subprocess.SubprocessError as e:
+                        logger.error(f"{package}のインストールに失敗しました: {e}")
+            
+        # KokoroTTSを使用
         from kokoro_mcp_server.kokoro.kokoro import KokoroTTSService
+        from kokoro_mcp_server.kokoro.base import TTSRequest
         kokoro_service = KokoroTTSService()
         logger.info("Using real Kokoro TTS service")
 except ImportError as e:
@@ -384,37 +346,32 @@ except ImportError as e:
         env = os.environ.copy()
         env['CMAKE_POLICY_VERSION_MINIMUM'] = '3.5'
         
-        if platform.system().lower() == 'windows':
-            # Windowsの場合は事前ビルド済みのホイールファイルを使用
-            try:
-                # 最新のPyOpenJTalkをインストール
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--no-cache-dir", 
-                     "https://github.com/r9y9/pyopenjtalk/releases/download/v0.3.0/pyopenjtalk-0.3.0-cp39-cp39-win_amd64.whl"],
-                    env=env, check=True
-                )
-            except subprocess.SubprocessError:
-                logger.warning("事前ビルド済みのPyOpenJTalkインストールに失敗しました。環境変数を設定して再試行します。")
-                # 通常のインストールを試す
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--no-cache-dir", "pyopenjtalk"],
-                    env=env, check=True
-                )
-        else:
-            # Linux/macOSの場合は通常のインストール
-            subprocess.run([sys.executable, "-m", "pip", "install", "pyopenjtalk"], env=env, check=True)
+        # 必要なパッケージをインストール
+        pkg_manager = select_package_manager()
+        if pkg_manager:
+            packages = ["torch", "librosa", "soundfile", "numpy", "pyopenjtalk"]
+            for package in packages:
+                try:
+                    install_cmd = create_package_command(pkg_manager, "install", [package])
+                    subprocess.run(install_cmd, env=env, check=True)
+                    logger.info(f"{package}のインストールに成功しました")
+                except subprocess.SubprocessError as e:
+                    logger.error(f"{package}のインストールに失敗しました: {e}")
         
         # 再度インポート試行
         if os.getenv("MOCK_TTS", "false").lower() in ("true", "1", "yes"):
             from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
+            from kokoro_mcp_server.kokoro.base import TTSRequest
             kokoro_service = MockKokoroTTSService()
         else:
             from kokoro_mcp_server.kokoro.kokoro import KokoroTTSService
+            from kokoro_mcp_server.kokoro.base import TTSRequest
             kokoro_service = KokoroTTSService()
     except Exception as e:
         logger.error(f"自動インストールにも失敗しました: {e}")
         # フォールバックとしてモックサービスを使用
         from kokoro_mcp_server.kokoro.mock import MockKokoroTTSService
+        from kokoro_mcp_server.kokoro.base import TTSRequest
         kokoro_service = MockKokoroTTSService()
         logger.warning("TTSサービスの初期化に失敗したため、MOCKサービスを使用します")
 
@@ -429,185 +386,86 @@ def list_available_voices() -> List[str]:
     # 現在は固定の音声リストを返す
     return ["jf_alpha", "jf_beta", "jf_gamma"]
 
-# 利用可能なリソース一覧の取得
-@app.list_resources()
-async def list_resources() -> list[Resource]:
-    resources = []
-    
-    # 音声リソース
-    resources.extend([
-        Resource(
-            uri=AnyUrl("voicestudio://voices/all"),
-            name="Available Voices",
-            mimeType="application/json",
-            description="List of all available voices"
-        ),
-        Resource(
-            uri=AnyUrl("voicestudio://audio/recent"),
-            name="Recent Audio Files",
-            mimeType="application/json",
-            description="List of recently generated audio files"
-        )
-    ])
-    
-    return resources
+# リソースの登録
+@mcp.resource("voices://available")
+def get_available_voices() -> str:
+    """利用可能な音声の一覧を返す"""
+    voices = list_available_voices()
+    return json.dumps({"voices": voices})
 
-# リソースの読み込み
-@app.read_resource()
-async def read_resource(uri: AnyUrl) -> str:
+@mcp.resource("audio://recent")
+def get_recent_audio() -> str:
+    """最近生成された音声ファイルの一覧を返す"""
+    # 最近生成された音声ファイルの一覧を取得
+    audio_files = []
+    for file in os.listdir(AUDIO_DIR):
+        if file.endswith(".wav"):
+            file_path = os.path.join(AUDIO_DIR, file)
+            audio_files.append({
+                "name": file,
+                "path": file_path,
+                "created": os.path.getctime(file_path)
+            })
+    return json.dumps({"audio_files": sorted(audio_files, key=lambda x: x["created"], reverse=True)})
+
+# TTSツール
+@mcp.tool()
+def text_to_speech(text: str, voice: str = "jf_alpha", speed: float = 1.0) -> Union[str, Image]:
     """
-    リソースの内容を読み込む関数。
+    テキストを音声に変換します
     
     Args:
-        uri: リソースのURI
+        text: 変換するテキスト
+        voice: 使用する音声ID (デフォルト: jf_alpha)
+        speed: 音声の速度 (0.5〜2.0の範囲, デフォルト: 1.0)
         
     Returns:
-        str: リソースの内容（JSON形式）
+        Union[str, Image]: 生成結果または音声データ
     """
-    if uri.path == "/voices/all":
-        return json.dumps({"voices": list_available_voices()})
-    elif uri.path == "/audio/recent":
-        # 最近生成された音声ファイルの一覧を取得
-        audio_files = []
-        for file in os.listdir(AUDIO_DIR):
-            if file.endswith(".wav"):
-                file_path = os.path.join(AUDIO_DIR, file)
-                audio_files.append({
-                    "name": file,
-                    "path": file_path,
-                    "created": os.path.getctime(file_path)
-                })
-        return json.dumps({"audio_files": sorted(audio_files, key=lambda x: x["created"], reverse=True)})
-    else:
-        raise ValueError(f"Unknown resource URI: {uri}")
-
-# 利用可能なツール一覧の取得
-@app.list_tools()
-async def list_tools() -> list[Tool]:
-    """
-    利用可能なツールの一覧を取得する関数。
+    if not text:
+        return "テキストが指定されていません"
     
-    Returns:
-        list[Tool]: ツールのリスト
-    """
-    return [
-        Tool(
-            name="text_to_speech",
-            description="テキストを音声に変換します",
-            parameters={
-                "text": {"type": "string", "description": "変換するテキスト"},
-                "voice": {"type": "string", "description": "使用する音声ID", "optional": True},
-                "speed": {"type": "number", "description": "音声の速度（0.5〜2.0）", "optional": True}
-            }
-        ),
-        Tool(
-            name="list_voices",
-            description="利用可能な音声の一覧を表示します",
-            parameters={}
-        )
-    ]
-
-# ツールの呼び出し
-@app.call_tool()
-async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
-    """
-    ツールを呼び出す関数。
+    if speed < 0.5 or speed > 2.0:
+        return "速度は0.5から2.0の範囲で指定してください"
     
-    Args:
-        name: ツール名
-        arguments: 引数
-        
-    Returns:
-        Sequence[TextContent | ImageContent | EmbeddedResource]: ツールの実行結果
-    """
     try:
-        # 引数の型チェックを追加
-        if not isinstance(arguments, dict):
-            return [TextContent(text="Invalid arguments format")]
-            
-        if name == "text_to_speech":
-            # 引数のバリデーションを追加
-            if not validate_tts_arguments(arguments):
-                return [TextContent(text="Invalid arguments for text_to_speech")]
+        # TTSRequestオブジェクトを作成
+        request = TTSRequest(text=text, voice=voice, speed=speed)
+        
+        # 音声生成
+        success, file_path = kokoro_service.generate(request)
+        
+        if success and file_path:
+            # 音声ファイルをロード
+            with open(file_path, "rb") as f:
+                audio_data = f.read()
                 
-            text = arguments.get("text", "")
-            voice = arguments.get("voice", "jf_alpha")
-            speed = arguments.get("speed", 1.0)
+            # ファイル名を取得
+            filename = os.path.basename(file_path)
             
-            if not text:
-                return [TextContent(text="テキストが指定されていません")]
-            
-            try:
-                # 音声生成
-                success, file_path = kokoro_service.generate({
-                    "text": text,
-                    "voice": voice,
-                    "speed": speed
-                })
-                
-                if success and file_path:
-                    # 音声ファイルをBase64エンコード
-                    with open(file_path, "rb") as f:
-                        audio_data = base64.b64encode(f.read()).decode("utf-8")
-                    
-                    return [
-                        TextContent(text=f"音声を生成しました：\nファイル: {os.path.basename(file_path)}"),
-                        EmbeddedResource(
-                            uri=AnyUrl(f"file://{file_path}"),
-                            mimeType="audio/wav",
-                            data=audio_data
-                        )
-                    ]
-                else:
-                    return [TextContent(text="音声の生成に失敗しました")]
-                
-            except Exception as e:
-                logger.error(f"音声生成エラー: {e}", exc_info=True)
-                return [TextContent(text=f"音声の生成中にエラーが発生しました: {str(e)}")]
-            
-        elif name == "list_voices":
-            voices = list_available_voices()
-            return [TextContent(text=f"利用可能な音声:\n{', '.join(voices)}")]
-        else:
-            return [TextContent(text=f"不明なツール: {name}")]
-    except Exception as e:
-        logger.error(f"ツール呼び出しエラー: {e}", exc_info=True)
-        return [TextContent(text=f"ツール呼び出しエラー: {str(e)}")]
-
-async def main():
-    """
-    メイン関数。
-    """
-    try:
-        # シグナルハンドラの設定を追加
-        if platform.system().lower() != 'windows':  # Windowsではsignalハンドラが異なる
-            for sig in (signal.SIGTERM, signal.SIGINT):
-                asyncio.get_event_loop().add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
-        
-        # 初期化オプション
-        initialization_options = InitializationOptions(
-            server_name="kokoro-mcp-server",
-            server_version="1.0.0",
-            capabilities=app.get_capabilities(
-                notification_options=NotificationOptions(),
-                experimental_capabilities={},
-            ),
-        )
-        
-        logger.info("Starting MCP server...")
-        
-        # 最新のMCP SDKに対応するためのstdio_server関数を使用
-        from mcp.server.stdio import stdio_server
-        
-        async with stdio_server() as (read_stream, write_stream):
-            await app.run(
-                read_stream,
-                write_stream,
-                initialization_options
+            # 音声データをImageオブジェクトとして返す
+            return Image(
+                data=audio_data,
+                format="wav",
+                filename=filename
             )
+        else:
+            return "音声の生成に失敗しました"
+        
     except Exception as e:
-        logger.error(f"サーバー起動エラー: {e}", exc_info=True)
-        sys.exit(1)
+        logger.error(f"音声生成エラー: {e}", exc_info=True)
+        return f"音声の生成中にエラーが発生しました: {str(e)}"
+
+@mcp.tool()
+def list_voices() -> str:
+    """
+    利用可能な音声の一覧を表示します
+    
+    Returns:
+        str: 利用可能な音声の一覧
+    """
+    voices = list_available_voices()
+    return f"利用可能な音声:\n{', '.join(voices)}"
 
 async def shutdown():
     """
@@ -617,6 +475,36 @@ async def shutdown():
     # クリーンアップ処理を実装
     sys.exit(0)
 
+async def main():
+    """
+    メイン関数。プラットフォーム依存のシグナルハンドリングを適切に処理します。
+    
+    Returns:
+        FastMCP: MCPサーバーインスタンス
+        
+    Raises:
+        Exception: サーバー起動時のエラー
+    """
+    try:
+        # シグナルハンドラの設定（プラットフォーム依存）
+        try:
+            # UNIXシステム用のシグナルハンドラ
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                asyncio.get_event_loop().add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
+            logger.info("Signal handlers registered successfully.")
+        except (NotImplementedError, AttributeError):
+            # Windowsではシグナルハンドラをスキップ
+            logger.info("Signal handlers not supported on this platform, skipping.")
+        
+        logger.info("Starting Kokoro MCP server...")
+        return mcp
+        
+    except Exception as e:
+        logger.error(f"サーバー起動エラー: {e}", exc_info=True)
+        sys.exit(1)
+
 if __name__ == "__main__":
     # asyncioのイベントループでmain関数を実行
-    asyncio.run(main())
+    server = asyncio.run(main())
+    if server:
+        server.run()
