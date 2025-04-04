@@ -42,6 +42,7 @@ tests/
 # ドキュメント
 docs/
 *.md
+!README.md
 
 # Docker関連 (循環参照防止)
 Dockerfile

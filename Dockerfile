@@ -32,9 +32,9 @@ RUN apt-get update \
 # Pythonパッケージのインストール
 COPY requirements.txt pyproject.toml ./
 
-# uvのインストールと仮想環境の作成
+# uvの最新バージョンをインストールして仮想環境を作成
 RUN pip install --upgrade pip \
-    && pip install 'uv==0.1.4' \
+    && pip install --upgrade 'uv>=0.1.4' \
     && uv venv \
     && . .venv/bin/activate \
     && uv pip install -r requirements.txt \

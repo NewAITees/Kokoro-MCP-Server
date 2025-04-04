@@ -32,4 +32,12 @@ export PYTHONPATH=/app:${PYTHONPATH}
 
 # サーバー起動
 echo "Starting Kokoro MCP Server..."
-exec uv run -m kokoro_mcp_server "$@" 
+
+# uvコマンドの存在とrunサブコマンドの確認
+if command -v uv &> /dev/null && uv --help | grep -q "run"; then
+    echo "Using uv run command..."
+    exec uv run -m kokoro_mcp_server "$@"
+else
+    echo "uv run command not available, using python directly..."
+    exec python -m kokoro_mcp_server "$@"
+fi 

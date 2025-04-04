@@ -61,14 +61,14 @@ dev = [
 ]
 
 [project.scripts]
-voicestudio-mcp = "src.main:main"
+kokoro-mcp-server = "kokoro_mcp_server.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
 [tool.hatch.build]
-packages = ["src"]
-include = [
+only-packages = true
+artifacts = [
     "src/**/*.py",
     "src/**/*.pyi",
 ]
