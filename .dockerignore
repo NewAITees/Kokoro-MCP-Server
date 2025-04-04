@@ -1,0 +1,53 @@
+# Git関連
+.git
+.gitignore
+
+# Python関連
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/.pytest_cache/
+.coverage
+htmlcov/
+**/*.egg-info/
+**/*.egg
+
+# 仮想環境
+.venv/
+venv/
+ENV/
+
+# ログファイル
+**/*.log
+logs/
+
+# キャッシュ
+.cache/
+**/.mypy_cache/
+
+# 出力ディレクトリ (コンテナ内で新規作成するため)
+output/
+
+# エディタ関連
+.idea/
+.vscode/
+**/*.swp
+**/*.swo
+**/*~
+.DS_Store
+
+# テストデータ
+tests/
+
+# ドキュメント
+docs/
+*.md
+
+# Docker関連 (循環参照防止)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 環境変数ファイル
+.env
+.env.example 

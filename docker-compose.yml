@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  kokoro-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kokoro-mcp-server:latest
+    container_name: kokoro-mcp-server
+    restart: unless-stopped
+    environment:
+      - MOCK_TTS=${MOCK_TTS:-false}  # モックモードの設定（デフォルトはfalse）
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}  # ログレベルの設定
+    volumes:
+      - ./output:/app/output  # 音声出力ディレクトリのマウント
+    # MCPをstdioモードで使用するため、stdin_openとttyをtrueに設定
+    stdin_open: true
+    tty: true
+    # ヘルスチェック設定
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s 

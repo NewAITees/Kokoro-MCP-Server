@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kokoro-tts": {
+      "command": "docker",
+      "args": ["compose", "-f", "/path/to/your/Kokoro-MCP-Server/docker-compose.yml", "run", "--rm", "-T", "kokoro-mcp-server"]
+    }
+  }
+} 
