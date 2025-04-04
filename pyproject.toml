@@ -61,16 +61,17 @@ dev = [
 ]
 
 [project.scripts]
-kokoro-mcp-server = "kokoro_mcp_server.main:main"
+kokoro-mcp-server = "kokoro_mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/kokoro_mcp_server"]
 
 [tool.hatch.build]
+packages = ["src/kokoro_mcp_server"]
 only-packages = true
 artifacts = [
-    "src/**/*.py",
-    "src/**/*.pyi",
+    "src/kokoro_mcp_server/**/*.py",
+    "src/kokoro_mcp_server/**/*.pyi",
 ]
 
 [tool.pytest.ini_options]
