@@ -1,24 +1,22 @@
 #!/bin/bash
+
+# Exit on error
 set -e
 
-# イメージ名とタグの設定
+# Configuration
 IMAGE_NAME="kokoro-mcp-server"
-VERSION="1.0.0"
-DOCKER_HUB_USERNAME=${DOCKER_HUB_USERNAME:-"yourusername"}
+PLATFORMS="linux/amd64,linux/arm64"
+DOCKER_HUB_USERNAME="your-dockerhub-username"  # Replace with your Docker Hub username
 
-# ビルダーインスタンスの作成
-echo "Creating multi-architecture builder..."
-docker buildx create --name kokoro-mcp-builder --use || echo "Builder already exists"
-docker buildx inspect --bootstrap
+# Create a new builder instance
+docker buildx create --name multiarch-builder --use || true
 
-# マルチアーキテクチャビルドの実行
-echo "Building multi-architecture image..."
+# Build and push multi-architecture images
 docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -t ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:${VERSION} \
-  -t ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:latest \
+  --platform ${PLATFORMS} \
+  --tag ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:latest \
   --push \
   .
 
-echo "Multi-architecture build completed successfully!"
-echo "Image: ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:${VERSION}" 
+# Clean up
+docker buildx rm multiarch-builder 

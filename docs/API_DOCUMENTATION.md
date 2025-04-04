@@ -1,8 +1,10 @@
-このドキュメントでは、VoiceCraft-MCP-Serverが実装するAPIとModel Context Protocol（MCP）の仕様について詳細に解説します。
+# Kokoro MCP Server API ドキュメント
+
+このドキュメントでは、Kokoro MCP Serverが実装するAPIとModel Context Protocol（MCP）の仕様について詳細に解説します。
 
 ## MCPプロトコル概要
 
-Model Context Protocol（MCP）は、AIアシスタント（Claude等）が外部ツールを呼び出してその機能を利用するためのオープンプロトコルです。VoiceCraft-MCP-Serverは、このプロトコルを実装して音声合成機能を提供します。
+Model Context Protocol（MCP）は、AIアシスタント（Claude等）が外部ツールを呼び出してその機能を利用するためのオープンプロトコルです。Kokoro MCP Serverは、このプロトコルを実装して音声合成機能を提供します。
 
 ### プロトコルの特徴
 
@@ -34,442 +36,197 @@ MCPは以下の通信方式をサポートしています：
 
 メッセージの形式はJSONで、UTF-8エンコーディングを使用します。また、JSON-RPC 2.0の仕様に基づくメッセージングフォーマットを採用しています。
 
-## VoiceCraft-MCP-Server固有のコマンド
+## Kokoro MCP Serverが提供するツール
 
-VoiceCraft-MCP-Serverは、MCPプロトコルの基本機能に加えて、以下の音声合成特化コマンドを提供します：
+Kokoro MCP Serverは、MCPプロトコルに準拠し、以下のツールとリソースを提供します：
 
-### 1. text_to_speech
+### ツール
 
-単一のテキストを音声に変換します。
+#### 1. text_to_speech
 
-#### リクエスト
+テキストを音声に変換するツールです。
+
+**パラメータ**:
+
+| パラメータ | タイプ | 必須 | 説明 |
+|----------|------|-----|-------------|
+| text | string | はい | 音声に変換するテキスト |
+| voice | string | いいえ | 使用する音声ID（デフォルト: "jf_alpha"） |
+| speed | float | いいえ | 音声の速度（範囲: 0.5-2.0, デフォルト: 1.0） |
+
+**戻り値**:
+- 成功時: 生成された音声データ（.wav形式）
+- 失敗時: エラーメッセージ
+
+**使用例**:
+```python
+# MCP クライアント側の例
+response = mcp_client.call_tool("text_to_speech", {
+    "text": "こんにちは、世界",
+    "voice": "jf_alpha",
+    "speed": 1.0
+})
+```
+
+#### 2. list_voices
+
+利用可能な音声の一覧を取得するツールです。
+
+**パラメータ**: なし
+
+**戻り値**:
+- 利用可能な音声IDのリストを含む文字列
+
+**使用例**:
+```python
+# MCP クライアント側の例
+response = mcp_client.call_tool("list_voices")
+```
+
+### リソース
+
+#### 1. voices://available
+
+利用可能な音声の一覧を提供するリソースです。
+
+**戻り値**:
+- 利用可能な音声IDの配列を含むJSON文字列
 
 ```json
 {
-  "command": "text_to_speech",
-  "request_id": "abc123",
-  "params": {
-    "text": "音声に変換するテキスト",
-    "language": "japanese",  // オプション
-    "options": {
-      "speed": 1.0,          // 再生速度
-      "pitch": 0.0,          // 音程調整
-      "voice_id": "default"  // 音声タイプ
-    }
-  }
+  "voices": ["jf_alpha", "jf_beta", "jf_gamma"]
 }
 ```
 
-#### パラメータ詳細
+#### 2. audio://recent
 
-| パラメータ | 型 | 必須 | 説明 |
-|----------|------|--------|-------------|
-| text | string | はい | 音声に変換するテキスト（最大5,000文字） |
-| language | string | いいえ | 言語コード。未指定の場合は自動検出（"japanese"または"english"） |
-| options | object | いいえ | 音声オプション |
+最近生成された音声ファイルの一覧を提供するリソースです。
 
-##### オプションパラメータ
-
-| オプション | 型 | デフォルト | 説明 |
-|----------|------|---------|-------------|
-| speed | float | 1.0 | 音声の速度。範囲: 0.5（遅い）〜2.0（速い） |
-| pitch | float | 0.0 | 音声のピッチ調整。範囲: -10.0（低い）〜10.0（高い） |
-| voice_id | string | "default" | 使用する音声のID。Kokoroエンジンがサポートする音声IDを指定 |
-
-#### レスポンス
+**戻り値**:
+- 最近生成された音声ファイルの情報を含むJSON文字列
 
 ```json
 {
-  "status": "success",
-  "request_id": "abc123",
-  "data": {
-    "audio_data": "data:audio/mp3;base64,AUDIO_DATA_BASE64",
-    "format": "mp3",
-    "duration": 2.5,  // 音声の長さ（秒）
-    "language": "japanese"  // 使用された言語
-  }
-}
-```
-
-#### エラーレスポンス
-
-```json
-{
-  "status": "error",
-  "request_id": "abc123",
-  "error": {
-    "code": "invalid_parameter",
-    "message": "テキストが空です"
-  }
-}
-```
-
-#### 使用例
-
-```javascript
-// クライアント側コード例（JavaScript）
-const ws = new WebSocket("ws://localhost:8080");
-
-ws.onopen = () => {
-  const request = {
-    command: "text_to_speech",
-    request_id: "abc123",
-    params: {
-      text: "こんにちは、世界",
-      language: "japanese",
-      options: {
-        speed: 1.2
-      }
-    }
-  };
-  
-  ws.send(JSON.stringify(request));
-};
-
-ws.onmessage = (event) => {
-  const response = JSON.parse(event.data);
-  if (response.status === "success") {
-    // audio_dataからBase64データを抽出
-    const audioData = response.data.audio_data.split(',')[1];
-    // Base64データをバイナリに変換
-    const audioBuffer = Uint8Array.from(atob(audioData), c => c.charCodeAt(0));
-    // 音声再生処理
-    playAudio(audioBuffer);
-  } else {
-    console.error("エラー:", response.error.message);
-  }
-};
-```
-
-### 2. conversation_audio
-
-会話形式のテキストを音声に変換します。複数の話者が含まれる場合に適しています。
-
-#### リクエスト
-
-```json
-{
-  "command": "conversation_audio",
-  "request_id": "def456",
-  "params": {
-    "text": "A: こんにちは\nB: お元気ですか？",
-    "language": "japanese",
-    "speakers": [
-      {
-        "name": "A",
-        "voice_id": "female_1"
-      },
-      {
-        "name": "B",
-        "voice_id": "male_1"
-      }
-    ],
-    "options": {
-      "speed": 1.0,
-      "include_speaker_labels": true
-    }
-  }
-}
-```
-
-#### パラメータ詳細
-
-| パラメータ | 型 | 必須 | 説明 |
-|----------|------|--------|-------------|
-| text | string | はい | 会話テキスト（最大10,000文字） |
-| language | string | いいえ | 言語コード（未指定の場合は自動検出） |
-| speakers | array | いいえ | 話者情報の配列 |
-| options | object | いいえ | 音声オプション |
-
-##### 話者情報
-
-| フィールド | 型 | 必須 | 説明 |
-|----------|------|--------|-------------|
-| name | string | はい | 話者の識別子（テキスト内で使用） |
-| voice_id | string | はい | 使用する音声ID |
-
-##### オプションパラメータ
-
-| オプション | 型 | デフォルト | 説明 |
-|----------|------|---------|-------------|
-| speed | float | 1.0 | 音声の速度 |
-| include_speaker_labels | boolean | false | 話者ラベルを音声に含めるかどうか |
-
-#### レスポンス
-
-```json
-{
-  "status": "success",
-  "request_id": "def456",
-  "data": {
-    "audio_data": "data:audio/mp3;base64,AUDIO_DATA_BASE64",
-    "format": "mp3",
-    "duration": 10.2,
-    "language": "japanese",
-    "speakers": ["A", "B"]
-  }
-}
-```
-
-#### 使用例
-
-```javascript
-// クライアント側コード例（JavaScript）
-const ws = new WebSocket("ws://localhost:8080");
-
-ws.onopen = () => {
-  const request = {
-    command: "conversation_audio",
-    request_id: "def456",
-    params: {
-      text: "User: What's the weather like?\nAssistant: It's sunny today.",
-      language: "english",
-      speakers: [
-        { name: "User", voice_id: "male_1" },
-        { name: "Assistant", voice_id: "female_1" }
-      ]
-    }
-  };
-  
-  ws.send(JSON.stringify(request));
-};
-```
-
-### 3. get_capabilities
-
-サーバーの機能と設定を取得します。
-
-```json
-{
-  "command": "get_capabilities",
-  "request_id": "ghi789"
-}
-```
-
-レスポンス例：
-```json
-{
-  "status": "success",
-  "request_id": "ghi789",
-  "data": {
-    "supported_languages": ["japanese", "english"],
-    "available_voices": {
-      "japanese": ["default", "female_1", "male_1"],
-      "english": ["default", "female_1", "male_1"]
+  "audio_files": [
+    {
+      "name": "jf_alpha_20250405_120000.wav",
+      "path": "output/audio/jf_alpha_20250405_120000.wav",
+      "created": 1712312400
     },
-    "max_text_length": 5000,
-    "speed_range": {
-      "min": 0.5,
-      "max": 2.0
-    },
-    "pitch_range": {
-      "min": -10.0,
-      "max": 10.0
-    }
-  }
+    ...
+  ]
 }
 ```
-
-#### パラメータ詳細
-
-| フィールド | 型 | 説明 |
-|----------|------|-------------|
-| supported_languages | array | サポートされている言語のリスト |
-| available_voices | object | 言語ごとの利用可能な音声IDのマップ |
-| max_text_length | number | 一度に処理可能な最大テキスト長 |
-| speed_range | object | 音声速度の調整可能範囲 |
-| pitch_range | object | 音声ピッチの調整可能範囲 |
 
 ## エラーコード
 
-サーバーから返されるエラーコードと意味は以下の通りです：
+サーバーから返されるエラーメッセージは以下のカテゴリに分類されます：
 
-| エラーコード | 説明 |
-|------------|-------------|
-| invalid_command | 不明なコマンド |
-| invalid_parameter | 無効なパラメータ |
-| missing_parameter | 必須パラメータの欠落 |
-| text_too_long | テキストが長すぎる |
-| unsupported_language | サポートされていない言語 |
-| unsupported_format | サポートされていない形式 |
-| speech_generation_failed | 音声生成に失敗 |
-| rate_limit_exceeded | レート制限超過 |
-| server_error | サーバー内部エラー |
+1. **入力検証エラー**: テキストが空、速度が範囲外など
+2. **音声生成エラー**: 音声合成エンジンが失敗した場合
+3. **システムエラー**: サーバー内部で発生した予期せぬエラー
 
-## レート制限
+## 実装詳細
 
-サーバーには以下のレート制限が設定されています：
+### TTSエンジン
 
-- 1分あたり最大60リクエスト
-- 1日あたり最大1,000リクエスト
+Kokoro MCP Serverは内部で以下のTTSエンジンを使用しています：
 
-制限を超えた場合、`rate_limit_exceeded` エラーが返されます。
+1. **Kokoro TTS**: 高品質な日本語音声合成エンジン
+2. **Mock TTS**: 開発・テスト用のモックエンジン（環境変数 `MOCK_TTS=true` で有効化）
 
-## 認証（オプション）
+### 音声特性
 
-認証が必要な環境では、WebSocket接続時にクエリパラメータで認証情報を提供できます：
+生成される音声ファイルは以下の特性を持ちます：
 
-```
-ws://localhost:8080?api_key=YOUR_API_KEY
-```
+- **フォーマット**: WAV
+- **サンプルレート**: 44100Hz
+- **チャンネル**: モノラル
+- **速度調整範囲**: 0.5倍（遅い）〜2.0倍（速い）
 
-または、リクエストヘッダーで認証情報を提供することも可能です：
+## テストと開発
 
-```javascript
-const ws = new WebSocket("ws://localhost:8080");
-ws.onopen = () => {
-  ws.send(JSON.stringify({
-    command: "authenticate",
-    params: {
-      api_key: "YOUR_API_KEY"
-    }
-  }));
-};
-```
-
-## HTTPインターフェース
-
-WebSocketに加えて、シンプルなHTTPインターフェースも提供しています：
-
-### テキスト読み上げ（HTTP）
-
-```
-POST /api/tts
-Content-Type: application/json
-
-{
-  "text": "こんにちは、世界",
-  "language": "japanese",
-  "options": {
-    "speed": 1.0
-  }
-}
-```
-
-レスポンス：
-
-```
-HTTP/1.1 200 OK
-Content-Type: audio/mp3
-
-[音声データ]
-```
-
-または：
-
-```
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "status": "success",
-  "data": {
-    "audio_url": "data:audio/mp3;base64,...\"
-  }
-}
-```
-
-## クライアント実装例
-
-### Pythonクライアント
+### クライアント側テストコード例（Python）
 
 ```python
 import json
-import websocket
+import requests
 
-# WebSocket接続を作成
-ws = websocket.create_connection("ws://localhost:8080")
-
-# リクエストを送信
-request = {
-    "command": "text_to_speech",
-    "request_id": "python-client-1",
-    "params": {
-        "text": "こんにちは、世界",
-        "language": "japanese"
-    }
-}
-ws.send(json.dumps(request))
-
-# レスポンスを受信
-response = json.loads(ws.recv())
-if response["status"] == "success":
+# HTTPインターフェースを使用する場合
+def test_http_tts():
+    response = requests.post(
+        "http://localhost:8080/api/tts",
+        json={
+            "text": "こんにちは、世界",
+            "voice": "jf_alpha",
+            "speed": 1.0
+        }
+    )
+    
     # 音声データを保存
-    audio_data = response["data"]["audio_data"].split(",")[1]
-    import base64
-    with open("output.mp3", "wb") as f:
-        f.write(base64.b64decode(audio_data))
-    print("音声ファイルを保存しました: output.mp3")
-else:
-    print("エラー:", response["error"]["message"])
+    if response.status_code == 200:
+        with open("output.wav", "wb") as f:
+            f.write(response.content)
+        print("音声ファイルを保存しました: output.wav")
+    else:
+        print(f"エラー: {response.text}")
 
-# 接続を閉じる
-ws.close()
+# MCPクライアントを使用する場合
+from mcp.client import MCPClient
+
+def test_mcp_tts():
+    client = MCPClient("localhost:8080")
+    result = client.call_tool("text_to_speech", {
+        "text": "こんにちは、世界",
+        "voice": "jf_alpha",
+        "speed": 1.0
+    })
+    
+    # 結果を処理
+    # ...
+
+if __name__ == "__main__":
+    test_http_tts()
 ```
 
-### Node.jsクライアント
+### Claude Desktopとの統合
 
-```javascript
-const WebSocket = require('ws');
-const fs = require('fs');
+Claude Desktopの設定ファイル例（`claude_desktop_config.json`）:
 
-// WebSocket接続を作成
-const ws = new WebSocket('ws://localhost:8080');
-
-ws.on('open', function open() {
-  // リクエストを送信
-  const request = {
-    command: "text_to_speech",
-    request_id: "node-client-1",
-    params: {
-      text: "こんにちは、世界",
-      language: "japanese"
+```json
+{
+  "mcpServers": {
+    "kokoro-tts": {
+      "command": "docker",
+      "args": ["compose", "-f", "/path/to/your/Kokoro-MCP-Server/docker-compose.yml", "run", "--rm", "-T", "kokoro-mcp-server"]
     }
-  };
-  ws.send(JSON.stringify(request));
-});
-
-ws.on('message', function incoming(data) {
-  const response = JSON.parse(data);
-  if (response.status === "success") {
-    // 音声データを保存
-    const audioData = response.data.audio_data.split(',')[1];
-    const buffer = Buffer.from(audioData, 'base64');
-    fs.writeFileSync('output.mp3', buffer);
-    console.log("音声ファイルを保存しました: output.mp3");
-  } else {
-    console.error("エラー:", response.error.message);
   }
-  ws.close();
-});
+}
 ```
 
-## テスト用ツール
+## セキュリティと制限
 
-開発とテストのために、コマンドラインツールが提供されています：
+1. **ローカル実行**: Kokoro MCP Serverはローカル環境での実行を前提としており、外部からのアクセスを想定していません
+2. **テキスト長**: 処理可能なテキストの長さに実質的な制限はありませんが、非常に長いテキストは処理に時間がかかります
 
-```bash
-# テキスト読み上げのテスト
-python tools/test_tts.py --text "こんにちは、世界" --language japanese
+## 今後の開発予定
 
-# 会話音声のテスト
-python tools/test_conversation.py --file conversation.txt
-```
+以下の機能拡張を計画しています：
 
-## 推奨使用方法
+1. **多言語サポート**: 英語など他の言語への対応強化
+2. **感情表現**: 感情を持った音声合成の実現
+3. **音声スタイル**: より多様な音声スタイルのサポート
+4. **ストリーミング出力**: 大きなテキストの処理効率化
 
-1. 起動時に `get_capabilities` を呼び出して、サポートされる機能と音声を確認
-2. ユーザー入力に基づいて適切なコマンドを選択
-3. 言語の自動検出機能を活用（特に多言語テキストの場合）
-4. 大きなテキストは適切なチャンクに分割して送信
+## APIの変更と下位互換性
 
-## 将来の拡張
+APIの変更があった場合は、CHANGELOG.mdに記録します。下位互換性を保つよう努めますが、大きな変更が必要な場合はメジャーバージョンを更新します。
 
-このAPIは将来、以下の機能で拡張される予定です：
+## 関連リソース
 
-1. スピーチマークのサポート（字幕やアニメーション同期用）
-2. ストリーミング音声出力
-3. 感情パラメータ
-4. 音声認識との統合
+- [MCP プロトコル仕様](https://github.com/mcp-dev/mcp-spec)
+- [Claude Developer Platform](https://docs.anthropic.com/claude/docs)
 
-最新の機能と変更については、プロジェクトのGitHubリポジトリを参照してください。
+---
+
+このドキュメントは継続的に更新されます。最新版は常にリポジトリを参照してください。

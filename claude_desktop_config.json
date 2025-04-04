@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kokoro-tts": {
+      "command": "docker",
+      "args": ["compose", "run", "--rm", "-T", "kokoro-mcp-server"],
+      "environment": {
+        "CLAUDE_API_KEY": "",
+        "LOG_LEVEL": "DEBUG"
+      }
+    }
+  }
+} 

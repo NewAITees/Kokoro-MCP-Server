@@ -7,7 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=off \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
     MECABRC=/etc/mecabrc \
-    FUGASHI_ENABLE_FALLBACK=1
+    FUGASHI_ENABLE_FALLBACK=1 \
+    VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 # 作業ディレクトリの設定
 WORKDIR /app
@@ -29,14 +32,13 @@ RUN apt-get update \
 # Pythonパッケージのインストール
 COPY requirements.txt pyproject.toml ./
 
-# uvのインストールと依存関係のインストール
+# uvのインストールと仮想環境の作成
 RUN pip install --upgrade pip \
     && pip install 'uv==0.1.4' \
-    && uv pip install -r requirements.txt
-
-# 必要なPython依存関係のインストール
-RUN uv pip install fugashi[unidic] unidic-lite ipadic \
-    && uv pip install pyopenjtalk
+    && uv venv \
+    && . .venv/bin/activate \
+    && uv pip install -r requirements.txt \
+    && CMAKE_POLICY_VERSION_MINIMUM=3.5 uv pip install fugashi[unidic] unidic-lite ipadic pyopenjtalk
 
 # mecabrcのシンボリックリンク作成
 RUN if [ ! -f "/usr/local/etc/mecabrc" ] && [ -f "/etc/mecabrc" ]; then \

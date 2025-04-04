@@ -1,8 +1,10 @@
-このドキュメントではVoiceCraft-MCP-Serverのシステムアーキテクチャについて詳細に説明します。
+# Kokoro MCP Server アーキテクチャ
+
+このドキュメントではKokoro MCP Serverのシステムアーキテクチャについて詳細に説明します。
 
 ## システム概要
 
-VoiceCraft-MCP-Serverは、AIアシスタント（Claude等）とKokoro音声合成エンジンを連携させるためのMCPサーバーです。このシステムにより、AIアシスタントのテキスト応答を自然な音声に変換し、よりリッチなユーザー体験を提供します。
+Kokoro MCP Serverは、AIアシスタント（Claude等）とKokoro音声合成エンジンを連携させるためのMCPサーバーです。このシステムにより、AIアシスタントのテキスト応答を自然な音声に変換し、よりリッチなユーザー体験を提供します。
 
 ## アーキテクチャ図
 
@@ -21,208 +23,95 @@ graph TD
 
 ### 1. MCPサーバー
 
-MCPサーバーは、AIアシスタントからのリクエストを受け付け、適切なハンドラにディスパッチする役割を担います。
+MCPサーバーは、AIアシスタントからのリクエストを受け付け、適切なハンドラにディスパッチする役割を担います。FastMCPフレームワークを使用してMCPプロトコルの実装を行っています。
 
 ```python
 # 疑似コード
-class MCPServer:
-    def __init__(self, host, port):
-        self.host = host
-        self.port = port
-        self.handlers = {}
+from mcp.server.fastmcp import FastMCP
+
+# サーバーの準備
+mcp = FastMCP("kokoro-mcp-server")
+
+# ツールの登録
+@mcp.tool()
+def text_to_speech(text: str, voice: str = "jf_alpha", speed: float = 1.0):
+    # 実装...
     
-    def register_handler(self, command, handler_func):
-        self.handlers[command] = handler_func
-    
-    def start(self):
-        # サーバーソケットの初期化と受信ループ
-        # リクエストの受信と処理
-        pass
-    
-    def handle_request(self, request):
-        command = request.get_command()
-        if command in self.handlers:
-            return self.handlers[command](request)
-        else:
-            return {\"error\": \"Unknown command\"}
+# リソースの登録
+@mcp.resource("voices://available")
+def get_available_voices():
+    # 実装...
 ```
 
-MCPサーバーは、WebSocketベースの通信を行い、JSONフォーマットでリクエストとレスポンスを処理します。
+MCPサーバーは、WebSocketベースの通信を行い、JSONフォーマットでリクエストとレスポンスを処理します。また、標準入出力（STDIO）を使用したローカルプロセス間通信もサポートしています。
 
-### 2. リクエストハンドラ
+### 2. TTSサービス
 
-各種リクエストを処理するハンドラ群です。主に「テキスト読み上げ」と「会話音声生成」を担当します。
+音声合成処理の中核となるコンポーネントで、以下の2つの実装を提供しています：
+
+1. **KokoroTTSService**: 実際の音声合成を行う実装
+2. **MockKokoroTTSService**: テスト・開発用のモック実装
 
 ```python
 # 疑似コード
-def handle_tts_request(request):
-    # リクエストからパラメータを抽出
-    text = request.get_parameter(\"text\")
-    language = request.get_parameter(\"language\")
-    options = request.get_parameter(\"options\", {})
+class BaseTTSService:
+    def generate(self, request: TTSRequest) -> tuple[bool, Optional[str]]:
+        """音声を生成する"""
+        raise NotImplementedError
+
+class KokoroTTSService(BaseTTSService):
+    def __init__(self):
+        """初期化"""
+        self.pipeline = self._create_pipeline()
+        
+    def _create_pipeline(self):
+        """TTSパイプラインを作成"""
+        # 実装...
     
-    # パラメータの検証
-    if not text:
-        return {\"error\": \"Text is required\"}
-    
-    # 言語検出（未指定の場合）
-    if not language:
-        language = language_processor.detect(text)
-    
-    # テキスト前処理
-    processed_text = language_processor.preprocess(text, language)
-    
-    # Kokoro音声合成エンジンを呼び出し
-    result = kokoro_connector.generate_speech(processed_text, language, options)
-    
-    # 音声処理（必要に応じて）
-    processed_audio = audio_processor.process(result.audio_data, options)
-    
-    # レスポンスを返却
-    return {
-        \"status\": \"success\",
-        \"audio_data\": processed_audio,
-        \"format\": \"mp3\",
-        \"language\": language
-    }
+    def generate(self, request: TTSRequest) -> tuple[bool, Optional[str]]:
+        """音声を生成する"""
+        # 実装...
 ```
+
+TTSサービスはモデルをロードし、テキストを音声に変換する処理を担当します。生成された音声データはWAVファイルとして保存され、クライアントに返されます。
 
 ### 3. 言語処理モジュール
 
-テキストの言語検出や前処理を行うモジュールです。
+テキストの言語検出や前処理を行うモジュールです。MeCabとfugashiなどのライブラリを使用して日本語テキストを適切に処理します。
 
 ```python
 # 疑似コード
-class LanguageProcessor:
-    def __init__(self):
-        # 言語検出のための初期化処理
-        pass
-    
-    def detect(self, text):
-        # 日本語と英語の文字カウントなどで言語を判定
-        japanese_chars = count_japanese_characters(text)
-        english_chars = count_english_characters(text)
-        
-        if japanese_chars > english_chars:
-            return \"japanese\"
-        else:
-            return \"english\"
-    
-    def preprocess(self, text, language):
-        # 言語に応じたテキスト前処理
-        if language == \"japanese\":
-            # 日本語特有の前処理
-            return process_japanese(text)
-        elif language == \"english\":
-            # 英語特有の前処理
-            return process_english(text)
-        else:
-            # その他の言語、またはデフォルト処理
-            return text
+def setup_mecab() -> bool:
+    """MeCabのセットアップを行う"""
+    # 実装...
+
+def setup_fugashi() -> bool:
+    """fugashiと関連する日本語辞書をセットアップする"""
+    # 実装...
 ```
 
-### 4. Kokoroコネクタ
+日本語の文章を適切に音声合成するために、テキストの分割や読み仮名の付与などの処理を行います。
 
-ローカルにインストールされたKokoro音声合成エンジンと連携するモジュールです。
+### 4. 音声処理モジュール
+
+生成された音声データの処理やキャッシュを担当します。音声の速度調整やリサンプリングなどを行います。
 
 ```python
 # 疑似コード
-class KokoroConnector:
-    def __init__(self, kokoro_path):
-        self.kokoro_path = kokoro_path
-        # Kokoroエンジンの初期化
-        self.initialize()
-    
-    def initialize(self):
-        # Kokoroエンジンの初期化処理
-        # モデルのロードなど
-        pass
-    
-    def generate_speech(self, text, language, options=None):
-        # デフォルトオプション
-        default_options = {
-            \"speed\": 1.0,
-            \"pitch\": 0.0,
-            \"voice_type\": \"default\"
-        }
-        
-        # オプションのマージ
-        if options:
-            merged_options = {**default_options, **options}
-        else:
-            merged_options = default_options
-        
-        # Kokoro音声合成エンジンの呼び出し
-        # ローカルプロセスとして実行、またはライブラリ呼び出し
-        audio_data = self._call_kokoro_engine(text, language, merged_options)
-        
-        return {
-            \"audio_data\": audio_data,
-            \"format\": \"mp3\"
-        }
-    
-    def _call_kokoro_engine(self, text, language, options):
-        # 実際のKokoro音声合成エンジン呼び出し処理
-        # コマンドライン実行またはAPI呼び出し
-        pass
+def _adjust_speed(audio: Tensor, speed: float) -> Tensor:
+    """音声の速度を調整する"""
+    # 実装...
 ```
 
-### 5. 音声処理モジュール
-
-生成された音声データの処理やキャッシュを担当します。
-
-```python
-# 疑似コード
-class AudioProcessor:
-    def __init__(self, cache_dir=None):
-        self.cache_dir = cache_dir
-        if cache_dir:
-            os.makedirs(cache_dir, exist_ok=True)
-    
-    def process(self, audio_data, options=None):
-        # 音声データの処理
-        # 音量の正規化、フォーマット変換など
-        processed_audio = self._apply_audio_processing(audio_data, options)
-        
-        # キャッシュが有効な場合は保存
-        if self.cache_dir:
-            cache_key = self._generate_cache_key(audio_data, options)
-            self._save_to_cache(processed_audio, cache_key)
-        
-        return processed_audio
-    
-    def _apply_audio_processing(self, audio_data, options):
-        # 実際の音声処理ロジック
-        pass
-    
-    def _generate_cache_key(self, audio_data, options):
-        # キャッシュキーの生成
-        pass
-    
-    def _save_to_cache(self, audio_data, cache_key):
-        # キャッシュへの保存
-        pass
-    
-    def get_from_cache(self, cache_key):
-        # キャッシュからの取得
-        if not self.cache_dir:
-            return None
-        
-        cache_path = os.path.join(self.cache_dir, cache_key)
-        if os.path.exists(cache_path):
-            with open(cache_path, \"rb\") as f:
-                return f.read()
-        
-        return None
-```
+生成された音声は、サンプルレートを44100Hzに変換し、WAVファイルとして保存されます。
 
 ## データフロー
 
 1. ユーザーがClaudeなどのAIアシスタントに「この内容を日本語で読んで」などのリクエストを送信
-2. AIアシスタントがMCPプロトコルを通じてVoiceCraft-MCP-Serverにリクエストを送信
+2. AIアシスタントがMCPプロトコルを通じてKokoro MCP Serverにリクエストを送信
 3. MCPサーバーがリクエストを受信し、リクエストハンドラにディスパッチ
 4. 言語処理モジュールでテキスト処理（言語検出、前処理など）
-5. Kokoroコネクタが音声合成エンジンを呼び出し
+5. KokoroコネクタがKokoro音声合成エンジンを呼び出し
 6. 音声処理モジュールで必要に応じて音声データを処理
 7. 生成された音声データをAIアシスタントに返送
 8. AIアシスタントがユーザーに音声を再生
@@ -233,16 +122,16 @@ class AudioProcessor:
 sequenceDiagram
     participant User as ユーザー
     participant AI as AIアシスタント
-    participant Server as VoiceCraft-MCP-Server
-    participant Kokoro as Kokoro音声合成エンジン
+    participant Server as Kokoro MCP Server
+    participant TTS as Kokoro音声合成エンジン
     
-    User->>AI: \"この内容を日本語で読んで\" と入力
+    User->>AI: "この内容を日本語で読んで" と入力
     AI->>AI: リクエストを検出
     AI->>Server: MCPリクエスト送信
     Server->>Server: リクエスト解析
     Server->>Server: 言語処理
-    Server->>Kokoro: 音声合成リクエスト
-    Kokoro->>Server: 音声データ返却
+    Server->>TTS: 音声合成リクエスト
+    TTS->>Server: 音声データ返却
     Server->>Server: 音声処理
     Server->>AI: 音声データ返却
     AI->>User: 音声再生
@@ -254,79 +143,111 @@ sequenceDiagram
 
 1. **検証エラー**: リクエストパラメータが不足または無効な場合
 2. **言語サポートエラー**: サポートされていない言語が指定された場合
-3. **Kokoroエンジンエラー**: 音声合成処理に失敗した場合
+3. **音声合成エンジンエラー**: 音声合成処理に失敗した場合
 4. **システムエラー**: その他の予期しないエラー
 
-各エラーは、MCPレスポンスとして適切なエラーコードとメッセージと共に返されます。
-
-```python
-# 疑似コード：エラーレスポンスの例
-def create_error_response(code, message):
-    return {
-        \"status\": \"error\",
-        \"error\": {
-            \"code\": code,
-            \"message\": message
-        }
-    }
-```
+各エラーは適切なメッセージと共にクライアントに返されます。また、ログシステムによって詳細なエラー情報が記録されます。
 
 ## 拡張性設計
 
 本システムは以下の拡張ポイントを考慮して設計されています：
 
-1. **言語サポートの拡張**: 新しい言語を追加するためのプラグイン機構
-2. **音声合成エンジンの切り替え**: Kokoro以外の音声合成エンジンをサポート
-3. **カスタムプリプロセッサ**: 特定のテキストパターンに対する前処理ロジックを追加
-4. **音声後処理フィルタ**: カスタム音声効果や処理を追加
+1. **音声合成エンジンの拡張**: `BaseTTSService`を継承した新しい音声合成エンジンの実装を追加可能
+2. **言語サポートの拡張**: 新しい言語モデルやトークナイザーを追加可能
+3. **音声処理フィルタの拡張**: 音声処理パイプラインに新しいフィルタを追加可能
 
-これらの拡張ポイントは、プラグインアーキテクチャとインターフェース設計により実現されます。
+これらの拡張ポイントは、モジュール間の疎結合設計により実現されています。
 
 ## パフォーマンス考慮事項
 
-1. **音声キャッシング**: 頻繁に使用されるフレーズの音声をキャッシュ
-2. **並行リクエスト処理**: 同時に複数のリクエストを処理
-3. **リソース管理**: Kokoro音声合成エンジンへの呼び出しを最適化
-4. **メモリ使用量**: 大きな音声データの効率的な処理
+1. **モデルのキャッシング**: 音声合成モデルは初期化時にロードされ、再利用されます
+2. **並行リクエスト処理**: 非同期処理によって複数のリクエストを効率的に処理します
+3. **リソース管理**: PyTorchなどのGPUリソースを効率的に管理します
 
 ## セキュリティ考慮事項
 
-1. **入力検証**: すべてのユーザー入力を適切に検証
-2. **リソース制限**: 過大なリクエストによるDoS攻撃の防止
-3. **ローカル処理**: すべての音声処理をローカル環境で実行し、データの外部送信を回避
+1. **入力検証**: すべてのユーザー入力を適切に検証して不正なリクエストを防止します
+2. **ローカル処理**: すべての処理をローカル環境で行い、データの外部送信を回避します
+3. **リソース制限**: 過大なリクエストによるDoS攻撃を防止するための制限を設けています
 
 ## デプロイメントアーキテクチャ
 
 本システムは以下の方法でデプロイ可能です：
 
-1. **スタンドアロンサーバー**: ローカルPC上で実行
-2. **Dockerコンテナ**: コンテナ化された環境で実行
-3. **サービス統合**: 既存のアプリケーションにライブラリとして統合
+1. **Dockerコンテナ**: `docker-compose.yml`によるコンテナ化されたデプロイメント
+2. **スタンドアロン**: Pythonスクリプトとして直接実行
+3. **Claude統合**: Claude Desktopとの統合による簡易デプロイメント
 
 ```mermaid
 graph LR
-    A[AIアシスタント] --- B[VoiceCraft-MCP-Server]
-    B --- C[Kokoro音声合成エンジン]
+    A[AIアシスタント<br>Claude Desktop] --- B[Kokoro MCP Server]
     
-    subgraph \"ローカル環境\"
+    subgraph "ローカル環境/Docker"
     B
-    C
     end
 ```
+
+## 技術的な依存関係
+
+- **Python**: 3.10以上
+- **MCP**: MCP ProtocolのPython実装（mcp-python, FastMCP）
+- **音声処理**: PyTorch, librosa, soundfile
+- **日本語処理**: MeCab, fugashi, pyopenjtalk
+- **ユーティリティ**: pydantic, loguru, click
+
+## Kokoroエンジンの実装詳細
+
+Kokoroエンジンは以下のコンポーネントで構成されています：
+
+1. **モデルローダー**: PyTorchベースのVitsModelをロードします
+2. **トークナイザー**: テキストをトークン化します
+3. **音声合成パイプライン**: トークン化されたテキストから音声を生成します
+4. **後処理**: 生成された音声データのリサンプリングや速度調整を行います
+
+```python
+# 疑似コード：音声合成パイプライン
+def pipeline(text, voice="jf_alpha", speed=1.0):
+    # テキストのトークン化
+    inputs = tokenizer(text, return_tensors="pt")
+    
+    # 音声生成
+    with torch.no_grad():
+        output = model(**inputs)
+        
+    # 音声データの取得
+    audio = output.audio[0]
+    
+    # 速度調整
+    if speed != 1.0:
+        audio = adjust_speed(audio, speed)
+        
+    return audio
+```
+
+この音声合成パイプラインは、高品質な日本語音声を生成するために最適化されています。
 
 ## 将来の拡張計画
 
 1. **多言語サポート**: より多くの言語に対応
 2. **感情表現**: 感情を込めた音声合成の実現
 3. **リアルタイムストリーミング**: 長いテキストのストリーミング処理
-4. **音声認識統合**: 双方向の音声対話を実現
+4. **ユーザーインターフェース**: Webベースの管理インターフェース
 
-## 技術的な依存関係
+これらの拡張は、現在のアーキテクチャを基盤として開発される予定です。
 
-- **Python**: 3.8以上
-- **WebSocket**: 通信プロトコル
-- **JSON**: データ形式
-- **Kokoro**: 音声合成エンジン
-- **pydub/librosa**: 音声処理ライブラリ（候補）
+## モジュール依存関係
+
+```mermaid
+graph LR
+    A[server.py] --> B[kokoro/__init__.py]
+    B --> C[kokoro/kokoro.py]
+    B --> D[kokoro/mock.py]
+    C --> E[kokoro/base.py]
+    D --> E
+```
+
+このモジュール構造により、コード再利用と保守性が向上します。
+
+---
 
 本アーキテクチャは、モジュール性、拡張性、保守性を重視して設計されています。各コンポーネントは疎結合であり、必要に応じて個別に更新・拡張できます。

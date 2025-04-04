@@ -2,7 +2,21 @@
   "mcpServers": {
     "kokoro-tts": {
       "command": "docker",
-      "args": ["compose", "-f", "/path/to/your/Kokoro-MCP-Server/docker-compose.yml", "run", "--rm", "-T", "kokoro-mcp-server"]
+      "args": ["compose", "-f", "/path/to/your/Kokoro-MCP-Server/docker-compose.yml", "run", "--rm", "-T", "kokoro-mcp-server"],
+      "environment": {
+        "OPENAI_API_KEY": "your-openai-api-key",
+        "CLAUDE_API_KEY": "your-claude-api-key",
+        "LOG_LEVEL": "INFO"
+      },
+      "volumes": {
+        "models": "/path/to/your/models",
+        "output": "/path/to/your/output"
+      },
+      "resources": {
+        "cpu_limit": "2",
+        "memory_limit": "4g",
+        "gpu_enabled": false
+      }
     }
   }
 } 

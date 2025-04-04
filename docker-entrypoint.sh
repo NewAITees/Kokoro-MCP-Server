@@ -24,9 +24,12 @@ if [ ! -f "/usr/local/etc/mecabrc" ]; then
     fi
 fi
 
+# 仮想環境のアクティベート
+. /app/.venv/bin/activate
+
 # Pythonパスの設定
 export PYTHONPATH=/app:${PYTHONPATH}
 
 # サーバー起動
 echo "Starting Kokoro MCP Server..."
-exec python -m kokoro_mcp_server "$@" 
+exec uv run -m kokoro_mcp_server "$@" 

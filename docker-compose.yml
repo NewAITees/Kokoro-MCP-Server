@@ -9,8 +9,11 @@ services:
     container_name: kokoro-mcp-server
     restart: unless-stopped
     environment:
-      - MOCK_TTS=${MOCK_TTS:-false}  # モックモードの設定（デフォルトはfalse）
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}  # ログレベルの設定
+      - MOCK_TTS=${MOCK_TTS:-true}  # モックモードを有効化
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}  # デバッグログを有効化
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}  # Claude APIキー
+    ports:
+      - "8080:8080"  # ポートマッピング
     volumes:
       - ./output:/app/output  # 音声出力ディレクトリのマウント
     # MCPをstdioモードで使用するため、stdin_openとttyをtrueに設定

@@ -1,13 +1,15 @@
-このガイドでは、VoiceCraft-MCP-Server プロジェクトの開発環境をセットアップする方法を詳しく説明します。
+# Kokoro MCP Server 開発環境セットアップガイド
+
+このガイドでは、Kokoro MCP Server プロジェクトの開発環境をセットアップする方法を詳しく説明します。
 
 ## 前提条件
 
-VoiceCraft-MCP-Server の開発には以下のソフトウェアが必要です：
+Kokoro MCP Server の開発には以下のソフトウェアが必要です：
 
-- Python 3.8 以上
+- Python 3.10 以上
 - uv パッケージマネージャー
 - Git
-- Kokoro 音声合成エンジン
+- Kokoro 音声合成エンジン（実モードで使用する場合）
 
 ## 基本セットアップ
 
@@ -15,8 +17,8 @@ VoiceCraft-MCP-Server の開発には以下のソフトウェアが必要です�
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/yourusername/VoiceCraft-MCP-Server.git
-cd VoiceCraft-MCP-Server
+git clone https://github.com/yourusername/Kokoro-MCP-Server.git
+cd Kokoro-MCP-Server
 ```
 
 ### 2. uvのインストールと仮想環境の作成
@@ -47,50 +49,43 @@ uv pip install -r requirements.txt
 uv pip install -r requirements-dev.txt
 ```
 
-## Kokoro 音声合成エンジンのセットアップ
+### 4. PyOpenJTalkのインストール
 
-Kokoro は、ローカルで動作する高品質な音声合成エンジンです。以下の手順でインストールします。
-
-### 1. Kokoro のダウンロードとインストール
-
-公式サイトから Kokoro をダウンロードし、インストールします。
+PyOpenJTalkはWindowsでのインストールに追加設定が必要な場合があります：
 
 ```bash
-# Kokoro モデルをダウンロードするディレクトリを作成
-mkdir -p models/kokoro
+# Linuxの場合
+CMAKE_POLICY_VERSION_MINIMUM=3.5 uv pip install pyopenjtalk
 
-# モデルのダウンロード（以下は例です）
-# 実際のダウンロード URL やインストール手順は Kokoro の公式ドキュメントを参照してください
-cd models/kokoro
-# ここに日本語モデルと英語モデルをダウンロードします
+# Windowsの場合
+$env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"; uv pip install pyopenjtalk
+
+# インストールに問題がある場合は、ビルド済みホイールを試す
+uv pip install https://github.com/r9y9/pyopenjtalk/releases/download/v0.3.0/pyopenjtalk-0.3.0-cp39-cp39-win_amd64.whl
 ```
 
-### 2. モデルの配置
+## MeCabとfugashiのセットアップ
 
-ダウンロードしたモデルファイルを適切なディレクトリに配置します。
+### 1. MeCabのインストール（Linuxの場合）
 
 ```bash
-# モデルファイルの配置例
-models/
-├── kokoro/
-│   ├── japanese/
-│   │   └── model_files...
-│   └── english/
-│       └── model_files...
+sudo apt-get update
+sudo apt-get install -y mecab libmecab-dev mecab-ipadic-utf8
 ```
 
-### 3. 環境変数の設定
-
-Kokoro の設定を環境変数に追加します。
+### 2. fugashiとunidic-liteのインストール
 
 ```bash
-# .env ファイルをサンプルからコピー
-cp .env.example .env
+uv pip install fugashi[unidic] unidic-lite ipadic
+```
 
-# .env ファイルをエディタで開いて編集
-# KOKORO_MODEL_PATH=./models/kokoro
-# KOKORO_JAPANESE_MODEL=japanese
-# KOKORO_ENGLISH_MODEL=english
+### 3. Windows特有の設定
+
+Windowsでは、MeCabの設定ファイルのパスを手動で設定する必要がある場合があります：
+
+```bash
+# mecab_windows_setup.pyを実行
+python mecab_windows_setup.py
 ```
 
 ## 開発用設定
@@ -101,7 +96,7 @@ cp .env.example .env
 
 ```bash
 # 開発モードで実行
-python src/main.py --dev
+MOCK_TTS=true python src/main.py --dev
 ```
 
 ### 2. ログ設定
@@ -113,13 +108,13 @@ python src/main.py --dev
 python src/main.py --log-level debug
 ```
 
-### 3. ポートの設定
+### 3. モックモードの使用
 
-デフォルトでは、サーバーは `8080` ポートで起動しますが、変更も可能です。
+Kokoro音声合成エンジンがない環境でも開発できるように、モックモードを使用できます：
 
 ```bash
-# カスタムポートで実行
-python src/main.py --port 9000
+# モックモードで実行
+MOCK_TTS=true python src/main.py
 ```
 
 ## テスト環境
@@ -139,24 +134,38 @@ pytest tests/test_mcp_server.py
 pytest --cov=src
 ```
 
-### 2. モック環境の使用
-
-Kokoro 音声合成エンジンが利用できない環境でも開発を行えるよう、モック機能が用意されています。
-
-```bash
-# モックモードで実行
-python src/main.py --mock
-```
-
-モックモードでは、実際の音声合成の代わりにサンプル音声ファイルが返されます。
-
-### 3. テスト用クライアント
+### 2. テスト用クライアント
 
 MCP サーバーの動作をテストするためのクライアントツールが提供されています。
 
 ```bash
 # テストクライアントの実行
-python tools/test_client.py --text \"こんにちは、世界\" --language \"japanese\"
+python tools/test_client.py --text "こんにちは、世界" --language "japanese"
+```
+
+## Docker環境
+
+### 1. Dockerコンテナのビルドと実行
+
+```bash
+# イメージをビルド
+make build
+
+# コンテナを起動
+make up
+
+# ログを確認
+make logs
+
+# コンテナ内でシェルを実行
+make shell
+```
+
+### 2. 開発モードでのDocker実行
+
+```bash
+# 開発モードでコンテナを起動（モックTTSを使用）
+make dev
 ```
 
 ## デバッグ手法
@@ -170,171 +179,95 @@ python tools/test_client.py --text \"こんにちは、世界\" --language \"jap
 python src/main.py --log-level debug
 ```
 
-### 2. 対話的デバッグ
+### 2. Python Debuggerの使用
 
-Python の `pdb` またはより高度な `ipdb` を使用して、対話的にコードをデバッグできます。
+Pythonのデバッガーを使用して、対話的にコードをデバッグできます：
 
 ```python
 # コード内でデバッグポイントを設定
 import pdb; pdb.set_trace()
-# または
-import ipdb; ipdb.set_trace()
 ```
 
-### 3. リクエスト/レスポンスの記録
+### 3. リクエスト/レスポンスのロギング
 
-開発中は、すべてのリクエストとレスポンスを記録して後で分析することができます。
+MCPリクエストとレスポンスをログに記録して確認できます：
 
 ```bash
-# リクエスト/レスポンスの記録を有効にして実行
-python src/main.py --record-requests
+# リクエスト/レスポンスのロギングを有効化
+python src/main.py --log-level debug --log-requests
 ```
 
-記録されたリクエストとレスポンスは `logs/requests/` ディレクトリに保存されます。
+## コード品質ツール
 
-## コードスタイルとリンター
-
-### 1. コードスタイルのチェック
-
-このプロジェクトでは、PEP 8 スタイルガイドとプロジェクト固有のルールに従ったコードスタイルを採用しています。
+### 1. Blackによるコードフォーマット
 
 ```bash
-# コードスタイルのチェック
-flake8 src/ tests/
-
-# 自動整形
+# コードのフォーマット
 black src/ tests/
+```
 
+### 2. isortによるインポートの整理
+
+```bash
 # インポートの整理
 isort src/ tests/
 ```
 
-### 2. 型チェック
-
-静的型チェックには mypy を使用しています。
+### 3. flake8によるリント
 
 ```bash
-# 型チェックの実行
+# コードのリント
+flake8 src/ tests/
+```
+
+### 4. mypyによる型チェック
+
+```bash
+# 型チェック
 mypy src/
 ```
 
-## 一般的なワークフロー
+## よくある問題と解決方法
 
-開発作業の一般的なワークフローは以下の通りです：
+### 1. MeCab関連のエラー
 
-1. 機能ブランチを作成する
-   ```bash
-   git checkout -b feature/new-feature
-   ```
-
-2. コードを変更し、テストを追加する
-
-3. テストを実行して変更が機能することを確認する
-   ```bash
-   pytest
-   ```
-
-4. コードスタイルをチェックし、必要に応じて修正する
-   ```bash
-   flake8 src/ tests/
-   black src/ tests/
-   ```
-
-5. 変更をコミットする
-   ```bash
-   git add .
-   git commit -m \"Add new feature: description\"
-   ```
-
-6. プルリクエストを作成する
-
-## トラブルシューティング
-
-### 1. 仮想環境の問題
-
-仮想環境の問題が発生した場合は、環境を再作成してください。
+MeCabが見つからない場合やmecabrcファイルにアクセスできない場合は、以下の解決方法を試してください：
 
 ```bash
-# 仮想環境を削除して再作成
-rm -rf .venv
-uv venv
-source .venv/bin/activate  # または .venv\Scripts\activate (Windows)
-uv pip install -r requirements.txt
-uv pip install -r requirements-dev.txt
+# MeCabの設定ファイルを探す
+find / -name mecabrc 2>/dev/null
+
+# 環境変数の設定
+export MECABRC=/path/to/mecabrc
+
+# または、シンボリックリンクの作成
+sudo ln -sf /path/to/mecabrc /usr/local/etc/mecabrc
 ```
 
-### 2. Kokoro エンジンの接続問題
-
-Kokoro 音声合成エンジンに接続できない場合：
-
-- `.env` ファイルのパス設定を確認
-- モデルファイルが正しくダウンロードされているか確認
-- `--mock` モードで実行して、サーバー自体の動作を確認
-
-### 3. ポートの競合
-
-指定したポートが既に使用されている場合：
+### 2. fugashiとunidic関連のエラー
 
 ```bash
-# 別のポートで実行
-python src/main.py --port 8081
+# まず、既存のパッケージをアンインストール
+uv pip uninstall fugashi ipadic unidic-lite
+
+# インストールし直す
+uv pip install fugashi[unidic] unidic-lite ipadic
 ```
 
-または：
+### 3. PyTorch関連のエラー
 
 ```bash
-# 現在ポートを使用しているプロセスを確認（Linux/macOS）
-lsof -i :8080
-
-# 現在ポートを使用しているプロセスを確認（Windows）
-netstat -ano | findstr :8080
+# PyTorchの再インストール
+uv pip uninstall torch
+uv pip install torch
 ```
 
-## パフォーマンスプロファイリング
+## MCP開発のベストプラクティス
 
-アプリケーションのパフォーマンスをプロファイリングするツールも提供されています。
-
-```bash
-# プロファイリングを有効にして実行
-python -m cProfile -o profile.stats src/main.py
-
-# 結果の分析
-python -m pstats profile.stats
-# または
-snakeviz profile.stats  # snakeviz がインストールされている場合
-```
-
-## 開発者ツール
-
-### 1. 開発者ダッシュボード
-
-開発中にサーバーの状態を監視するためのダッシュボードがあります。
-
-```bash
-# ダッシュボードを有効にして実行
-python src/main.py --dashboard
-```
-
-ダッシュボードには `http://localhost:8081` でアクセスできます（デフォルト）。
-
-### 2. API ドキュメントの生成
-
-API ドキュメントは自動的に生成されます。
-
-```bash
-# API ドキュメントの生成
-python tools/generate_api_docs.py
-```
-
-生成されたドキュメントは `docs/api/` ディレクトリに保存されます。
-
-## CI/CD パイプライン
-
-このプロジェクトでは CI/CD パイプラインを使用して、コードの品質と一貫性を確保しています。
-
-- プルリクエスト時に自動的にテストが実行されます
-- マージ前にコードスタイルと型チェックが行われます
-- リリースブランチへのマージ時に自動的にバージョンがタグ付けされます
+1. **ツール定義の明確化**: MCPツールの引数と戻り値を明確に定義してください
+2. **エラーハンドリング**: すべてのMCPリクエストを適切にエラーハンドリングしてください
+3. **テスト駆動開発**: 新機能を追加する前にテストを作成してください
+4. **ドキュメント**: すべてのAPIとツールを適切にドキュメント化してください
 
 ## ヘルプの取得
 
@@ -342,8 +275,8 @@ python tools/generate_api_docs.py
 
 - GitHub Issues でバグを報告する
 - プロジェクトの Wiki を参照する
-- コードのドキュメンテーションを確認する
+- README.md や ARCHITECTURE.md などのドキュメントを確認する
 
 ---
 
-これで VoiceCraft-MCP-Server の開発環境が整いました。楽しいコーディングを！
+これで Kokoro MCP Server の開発環境が整いました。楽しいコーディングを！
