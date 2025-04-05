@@ -1,0 +1,12 @@
+{
+    "name": "kokoro-mcp-server",
+    "version": "0.1.0",
+    "description": "AI アシスタントと連携し、テキストを高品質な音声に変換する MCP サーバー",
+    "capabilities": {
+        "textToSpeech": {
+            "supportedVoices": ["jf_alpha"],
+            "supportedFormats": ["wav"],
+            "supportedLanguages": ["ja"]
+        }
+    }
+} 

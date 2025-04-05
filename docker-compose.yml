@@ -1,4 +1,3 @@
-
 services:
   kokoro-mcp-server:
     build:
@@ -15,6 +14,7 @@ services:
       - "8080:8080"  # ポートマッピング
     volumes:
       - ./output:/app/output  # 音声出力ディレクトリのマウント
+      - ./src/kokoro_mcp_server/config.json:/app/src/kokoro_mcp_server/config.json  # 設定ファイルのマウント
     # MCPをstdioモードで使用するため、stdin_openとttyをtrueに設定
     stdin_open: true
     tty: true

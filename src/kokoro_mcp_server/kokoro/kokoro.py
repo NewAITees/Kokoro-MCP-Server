@@ -10,10 +10,15 @@ from numpy.typing import NDArray
 import librosa
 import soundfile as sf
 import torch
-
+import os
+from dotenv import load_dotenv
+from kokoro import KPipeline
 from torch import Tensor
 from typing import cast, Any, Generator, Tuple, Optional, List
 from .base import BaseTTSService, TTSRequest
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -23,62 +28,14 @@ class KokoroTTSService(BaseTTSService):
     def __init__(self):
         """Initialize the service"""
         self.logger = logger
+        self.language = "j"  # Default to Japanese
+        self.voice = "jf_alpha"  # Default voice
         self.pipeline = self._create_pipeline()
         
-    def _create_pipeline(self):
+    def _create_pipeline(self) -> Optional[KPipeline]:
         """Create TTS pipeline"""
         try:
-            from transformers import VitsModel, AutoTokenizer
-            
-            # モデルとトークナイザーの初期化
-            model = VitsModel.from_pretrained("facebook/mms-tts-jpn")
-            tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-jpn")
-            
-            def pipeline(
-                text: str,
-                voice: str = "jf_alpha",
-                speed: float = 1.0,
-                split_pattern: Optional[str] = None
-            ) -> Generator[Tuple[list, list, Optional[Tensor]], None, None]:
-                """
-                テキストから音声を生成するパイプライン
-                
-                Args:
-                    text: 変換するテキスト
-                    voice: 使用する音声ID
-                    speed: 音声の速度
-                    split_pattern: テキストの分割パターン
-                    
-                Yields:
-                    tuple[list, list, Optional[Tensor]]: グラフェム、音素、音声データ
-                """
-                try:
-                    # テキストのトークン化
-                    inputs = tokenizer(text, return_tensors="pt")
-                    
-                    # 音声生成
-                    with torch.no_grad():
-                        output = model(**inputs)
-                        
-                    # 音声データの取得
-                    audio = output.audio[0]
-                    
-                    # 速度調整
-                    if speed != 1.0:
-                        audio = self._adjust_speed(audio, speed)
-                        
-                    yield (
-                        output.graphemes[0],
-                        output.phonemes[0],
-                        audio
-                    )
-                    
-                except Exception as e:
-                    self.logger.error(f"Pipeline error: {e}", exc_info=True)
-                    yield [], [], None
-                    
-            return pipeline
-            
+            return KPipeline(lang_code=self.language)
         except Exception as e:
             self.logger.error(f"Pipeline creation error: {e}", exc_info=True)
             return None
@@ -136,55 +93,47 @@ class KokoroTTSService(BaseTTSService):
             speed = request.speed if request.speed is not None else 1.0
             self.logger.debug(f"Speed set to: {speed}")
 
-            # 高品質な日本語音声を使用
-            voice = "jf_alpha" if not request.voice else request.voice
+            # 音声の設定
+            voice = request.voice or self.voice
             self.logger.info(f"Using voice: {voice}")
 
             # 出力ファイル名の生成
             filename = voice_folder / f"{base_filename}_{timestamp}.wav"
             self.logger.debug(f"Generated filename: {filename}")
 
-            self.logger.debug("Starting pipeline generation...")
-            # 分割せずに一度に生成
-            gs, ps, audio = next(
-                self.pipeline(
-                    request.text,
-                    voice=voice,
-                    speed=cast(Any, speed),
-                    split_pattern=None,  # 分割を行わない
-                )
+            # パイプラインの実行
+            generator = self.pipeline(
+                request.text,
+                voice=voice,
+                speed=speed,
+                split_pattern=r"[。、．，!?！？\n]+"  # より自然な区切りのためのパターン
             )
 
-            try:
+            # 音声データの結合
+            combined_audio = []
+            for gs, ps, audio in generator:
                 if audio is not None:
-                    # 音声データをNumPy配列に変換して保存
-                    self.logger.debug("Converting audio to numpy array...")
-                    # audioはTensorなのでcpu()とnumpy()が使える
-                    audio_tensor: Tensor = cast(Tensor, audio)
-                    audio_np: NDArray[np.float64] = audio_tensor.cpu().numpy()
+                    combined_audio.append(audio.cpu().numpy())
 
-                    # 24000Hzから44100Hzにリサンプリング
-                    self.logger.debug("Resampling audio from 24000Hz to 44100Hz...")
-                    # リサンプリング時は1次元配列が必要
-                    if len(audio_np.shape) > 1:
-                        audio_np = audio_np.squeeze()
-                    audio_resampled: NDArray[np.float64] = librosa.resample(
-                        y=audio_np, orig_sr=24000, target_sr=44100
-                    )
+            if combined_audio:
+                # 音声データを結合
+                final_audio = np.concatenate(combined_audio)
+                
+                # 24000Hzから44100Hzにリサンプリング
+                self.logger.debug("Resampling audio from 24000Hz to 44100Hz...")
+                audio_resampled = librosa.resample(
+                    y=final_audio, orig_sr=24000, target_sr=44100
+                )
 
-                    self.logger.debug(f"Writing audio to file: {filename}")
-                    sf.write(str(filename), audio_resampled, 44100)
+                # 音声ファイルの保存
+                self.logger.debug(f"Writing audio to file: {filename}")
+                sf.write(str(filename), audio_resampled, 44100)
 
-                    self.logger.info(f"Successfully generated audio file: {filename}")
-                    self.logger.debug(f"Graphemes: {gs}")
-                    self.logger.debug(f"Phonemes: {ps}")
-                    return True, str(filename)
-                self.logger.warning("No audio was generated")
-                return False, None
-
-            except Exception as e:
-                self.logger.error(f"Error processing audio: {e}", exc_info=True)
-                return False, None
+                self.logger.info(f"Successfully generated audio file: {filename}")
+                return True, str(filename)
+            
+            self.logger.warning("No audio was generated")
+            return False, None
 
         except Exception as e:
             self.logger.error(f"Kokoro TTS Error: {e}", exc_info=True)
@@ -193,7 +142,7 @@ class KokoroTTSService(BaseTTSService):
     def generate_audio(
         self,
         text: str,
-        voice: str = "jf_alpha",  # デフォルトを高品質な日本語音声に変更
+        voice: str = "jf_alpha",
         speed: float = 1.0,
     ) -> Generator[tuple[str, str, torch.Tensor], None, None]:
         """音声生成の実行
@@ -215,8 +164,8 @@ class KokoroTTSService(BaseTTSService):
             generator = self.pipeline(
                 text,
                 voice=voice,
-                speed=cast(Any, speed),
-                split_pattern=r"[。、．，!?！？\n]+",  # より自然な区切りのためのパターン
+                speed=speed,
+                split_pattern=r"[。、．，!?！？\n]+"  # より自然な区切りのためのパターン
             )
 
             for gs, ps, audio in generator:

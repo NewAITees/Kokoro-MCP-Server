@@ -16,6 +16,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context, Image
 from pathlib import Path
+from .kokoro.kokoro import KokoroTTSService
+from .kokoro.base import TTSRequest
+
 
 # 環境変数の読み込み
 load_dotenv()
@@ -34,6 +37,9 @@ elif os.path.exists('/etc/mecabrc'):
 
 # fugashiのフォールバック設定
 os.environ['FUGASHI_ENABLE_FALLBACK'] = '1'
+
+# TTSサービスの初期化
+tts_service = KokoroTTSService()
 
 # MCPサーバーの設定
 mcp = FastMCP(
@@ -121,9 +127,20 @@ def text_to_speech(text: str, voice: str = "jf_alpha", speed: float = 1.0) -> Un
         if not validate_tts_arguments({"text": text, "voice": voice, "speed": speed}):
             return "Invalid arguments"
             
-        # 音声生成処理
-        # TODO: 実際の音声生成処理を実装
-        return "Audio generation not implemented yet"
+        # TTSリクエストの作成
+        request = TTSRequest(text=text, voice=voice, speed=speed)
+        
+        # 音声生成
+        success, file_path = tts_service.generate(request)
+        
+        if success and file_path:
+            # 音声ファイルを読み込んでbase64エンコード
+            with open(file_path, "rb") as f:
+                audio_data = base64.b64encode(f.read()).decode("utf-8")
+            return Image(audio_data)
+        else:
+            logger.error("音声生成に失敗しました")
+            return "Failed to generate audio"
         
     except Exception as e:
         logger.error(f"音声生成エラー: {e}", exc_info=True)
