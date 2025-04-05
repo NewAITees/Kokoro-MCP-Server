@@ -33,7 +33,7 @@ dependencies = [
     "uvloop>=0.17.0;sys_platform!='win32'",
     "kokoro>=0.9.2",
     "librosa>=0.10.1",
-    "torch>=2.0.0",
+    "torch>=2.0.0,<2.2.0",
     "pyopenjtalk>=0.4.0",
     "fugashi>=1.4.0",
     "mojimoji>=0.0.13",
