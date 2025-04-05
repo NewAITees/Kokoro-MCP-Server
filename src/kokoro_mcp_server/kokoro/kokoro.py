@@ -10,15 +10,12 @@ from numpy.typing import NDArray
 import librosa
 import soundfile as sf
 import torch
-import os
-from dotenv import load_dotenv
+
 from kokoro import KPipeline
 from torch import Tensor
 from typing import cast, Any, Generator, Tuple, Optional, List
 from .base import BaseTTSService, TTSRequest
 
-# Load environment variables
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
