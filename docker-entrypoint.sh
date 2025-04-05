@@ -36,8 +36,8 @@ echo "Starting Kokoro MCP Server..."
 # uvコマンドの存在とrunサブコマンドの確認
 if command -v uv &> /dev/null && uv --help | grep -q "run"; then
     echo "Using uv run command..."
-    exec uv run kokoro_mcp_server "$@"
+    exec uv run --directory ./src -m kokoro_mcp_server "$@"
 else
     echo "uv run command not available, using python directly..."
-    exec python -m kokoro_mcp_server "$@"
+    exec python --directory ./src -m kokoro_mcp_server "$@"
 fi 
