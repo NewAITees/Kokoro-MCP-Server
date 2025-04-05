@@ -166,18 +166,23 @@ async def shutdown():
 async def main():
     """メインの実行関数"""
     try:
+        print("=" * 50)
         print("server.py: main関数が呼び出されました")
+        print("=" * 50)
+        
         # シグナルハンドラの設定
         for sig in (signal.SIGTERM, signal.SIGINT):
             asyncio.get_event_loop().add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown()))
             
-        logger.info("MCPサーバーを起動します...")
+        print("MCPサーバーを起動します...")
+        print(f"サーバー名: {mcp.name}")
+        print(f"サポートされている音声: {list_available_voices()}")
         print("MCPサーバーのインスタンスを返します")
         return mcp
         
     except Exception as e:
-        logger.error(f"サーバー初期化エラー: {e}", exc_info=True)
-        print(f"server.py: サーバー初期化エラー: {e}")
+        print(f"サーバー初期化エラー: {e}")
+        print(f"詳細なエラー情報: {sys.exc_info()}")
         return None
 
 if __name__ == "__main__":
