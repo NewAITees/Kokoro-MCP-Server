@@ -124,25 +124,9 @@ MOCK_TTS=true python src/main.py
 
 プロジェクトには、自動テストスイートが含まれています。
 
-```bash
-# すべてのテストを実行
-pytest
-
-# 特定のテストモジュールを実行
-pytest tests/test_mcp_server.py
-
-# カバレッジレポートを生成
-pytest --cov=src
-```
 
 ### 2. テスト用クライアント
 
-MCP サーバーの動作をテストするためのクライアントツールが提供されています。
-
-```bash
-# テストクライアントの実行
-python tools/test_client.py --text "こんにちは、世界" --language "japanese"
-```
 
 ## Docker環境
 
