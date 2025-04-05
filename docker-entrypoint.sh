@@ -12,16 +12,17 @@ echo "=================================="
 # 出力ディレクトリの作成
 mkdir -p /app/output/audio
 
-# 依存関係の確認
-echo "Checking dependencies..."
-if [ ! -f "/usr/local/etc/mecabrc" ]; then
-    echo "Creating mecabrc symlink..."
-    mkdir -p /usr/local/etc
-    if [ -f "/etc/mecabrc" ]; then
-        ln -sf /etc/mecabrc /usr/local/etc/mecabrc
-    else
-        echo "Warning: mecabrc not found"
-    fi
+# MeCabの設定確認
+echo "Checking MeCab configuration..."
+MECAB_CONFIG_DIR="/app/.venv/lib/python3.10/site-packages/unidic/dicdir"
+if [ ! -f "${MECAB_CONFIG_DIR}/mecabrc" ]; then
+    echo "Creating MeCab configuration..."
+    mkdir -p "${MECAB_CONFIG_DIR}"
+    cat > "${MECAB_CONFIG_DIR}/mecabrc" << EOF
+dicdir = ${MECAB_CONFIG_DIR}
+cost-factor = 800
+max-grouping-size = 10
+EOF
 fi
 
 # 仮想環境のアクティベート

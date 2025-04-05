@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=off \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
-    MECABRC=/etc/mecabrc \
+    MECABRC=/app/.venv/lib/python3.10/site-packages/unidic/dicdir/mecabrc \
     FUGASHI_ENABLE_FALLBACK=1 \
     VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \
@@ -41,11 +41,11 @@ RUN pip install --upgrade pip \
     && uv pip install -r requirements.txt \
     && CMAKE_POLICY_VERSION_MINIMUM=3.5 uv pip install fugashi[unidic] unidic-lite ipadic pyopenjtalk
 
-# mecabrcのシンボリックリンク作成
-RUN if [ ! -f "/usr/local/etc/mecabrc" ] && [ -f "/etc/mecabrc" ]; then \
-        mkdir -p /usr/local/etc && \
-        ln -sf /etc/mecabrc /usr/local/etc/mecabrc; \
-    fi
+# MeCabの設定ファイルを作成
+RUN mkdir -p /app/.venv/lib/python3.10/site-packages/unidic/dicdir && \
+    echo "dicdir = /app/.venv/lib/python3.10/site-packages/unidic/dicdir" > /app/.venv/lib/python3.10/site-packages/unidic/dicdir/mecabrc && \
+    echo "cost-factor = 800" >> /app/.venv/lib/python3.10/site-packages/unidic/dicdir/mecabrc && \
+    echo "max-grouping-size = 10" >> /app/.venv/lib/python3.10/site-packages/unidic/dicdir/mecabrc
 
 # ソースコードのコピー
 COPY . .
