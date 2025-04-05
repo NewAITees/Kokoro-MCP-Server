@@ -12,6 +12,42 @@ echo "=================================="
 # 出力ディレクトリの作成
 mkdir -p /app/output/audio
 
+# 設定ファイルの確認と作成
+echo "Checking configuration files..."
+CONFIG_PATHS=(
+    "/app/src/kokoro_mcp_server/config.json"
+    "/app/config.json"
+)
+
+for config_path in "${CONFIG_PATHS[@]}"; do
+    if [ -f "$config_path" ]; then
+        echo "Found configuration file: $config_path"
+        echo "Configuration contents:"
+        cat "$config_path"
+        break
+    fi
+done
+
+if [ ! -f "/app/src/kokoro_mcp_server/config.json" ] && [ ! -f "/app/config.json" ]; then
+    echo "Warning: Configuration file not found, creating default..."
+    mkdir -p /app/src/kokoro_mcp_server
+    cat > /app/src/kokoro_mcp_server/config.json << EOF
+{
+    "name": "kokoro-mcp-server",
+    "version": "0.1.0",
+    "description": "AI アシスタントと連携し、テキストを高品質な音声に変換する MCP サーバー",
+    "capabilities": {
+        "textToSpeech": {
+            "supportedVoices": ["jf_alpha"],
+            "supportedFormats": ["wav"],
+            "supportedLanguages": ["ja"]
+        }
+    }
+}
+EOF
+    echo "Created default configuration file at /app/src/kokoro_mcp_server/config.json"
+fi
+
 # MeCabの設定確認
 echo "Checking MeCab configuration..."
 MECAB_CONFIG_DIR="/app/.venv/lib/python3.10/site-packages/unidic/dicdir"

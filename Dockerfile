@@ -50,6 +50,12 @@ RUN mkdir -p /app/.venv/lib/python3.10/site-packages/unidic/dicdir && \
 # ソースコードのコピー
 COPY . .
 
+# 設定ファイルのコピー（明示的に）
+COPY src/kokoro_mcp_server/config.json /app/src/kokoro_mcp_server/config.json
+
+# バックアップとしてルートディレクトリにもコピー
+COPY src/kokoro_mcp_server/config.json /app/config.json
+
 # 出力ディレクトリの作成
 RUN mkdir -p output/audio
 

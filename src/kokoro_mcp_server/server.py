@@ -14,11 +14,14 @@ import shutil
 import signal
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP, Context, Image
+from mcp.server.models import InitializationOptions
+import mcp.types as types
+from mcp.server import NotificationOptions, Server
+from pydantic import AnyUrl
+import mcp.server.stdio
 from pathlib import Path
 from .kokoro.kokoro import KokoroTTSService
 from .kokoro.base import TTSRequest
-
 
 # 環境変数の読み込み
 load_dotenv()
@@ -42,10 +45,7 @@ os.environ['FUGASHI_ENABLE_FALLBACK'] = '1'
 tts_service = KokoroTTSService()
 
 # MCPサーバーの設定
-mcp = FastMCP(
-    name="kokoro-mcp-server",
-    description="AI アシスタントと連携し、テキストを高品質な音声に変換する MCP サーバー"
-)
+server = Server("kokoro-mcp-server")
 
 def validate_tts_arguments(arguments: dict) -> bool:
     """
@@ -88,74 +88,111 @@ def list_available_voices() -> List[str]:
     """
     return ["jf_alpha"]
 
-@mcp.resource("voices://available")
-def get_available_voices() -> str:
-    """利用可能な音声の一覧をJSON形式で返す"""
-    voices = list_available_voices()
-    return json.dumps({"voices": voices})
-
-@mcp.resource("audio://recent")
-def get_recent_audio() -> str:
-    """最近生成された音声ファイルのパスを返す"""
-    audio_dir = Path("output/audio")
-    if not audio_dir.exists():
-        return json.dumps({"error": "No audio files found"})
-        
-    files = sorted(audio_dir.glob("*.wav"), key=lambda x: x.stat().st_mtime, reverse=True)
-    if not files:
-        return json.dumps({"error": "No audio files found"})
-        
-    with open(files[0], "rb") as f:
-        audio_data = base64.b64encode(f.read()).decode("utf-8")
-    return json.dumps({"audio": audio_data})
-
-@mcp.tool()
-def text_to_speech(text: str, voice: str = "jf_alpha", speed: float = 1.0) -> Union[str, Image]:
+@server.list_resources()
+async def handle_list_resources() -> list[types.Resource]:
     """
-    テキストを音声に変換する
-    
-    Args:
-        text: 変換するテキスト
-        voice: 使用する音声（デフォルト: "jf_alpha"）
-        speed: 音声の速度（デフォルト: 1.0）
-        
-    Returns:
-        Union[str, Image]: 生成された音声ファイルのパスまたはエラーメッセージ
+    List available TTS resources.
     """
-    try:
-        # 引数の検証
-        if not validate_tts_arguments({"text": text, "voice": voice, "speed": speed}):
-            return "Invalid arguments"
+    return [
+        types.Resource(
+            uri=AnyUrl("voices://available"),
+            name="Available Voices",
+            description="List of available TTS voices",
+            mimeType="application/json",
+        ),
+        types.Resource(
+            uri=AnyUrl("audio://recent"),
+            name="Recent Audio",
+            description="Most recently generated audio file",
+            mimeType="audio/wav",
+        )
+    ]
+
+@server.read_resource()
+async def handle_read_resource(uri: AnyUrl) -> str:
+    """
+    Read a specific resource by its URI.
+    """
+    if uri.scheme == "voices":
+        voices = list_available_voices()
+        return json.dumps({"voices": voices})
+    elif uri.scheme == "audio":
+        audio_dir = Path("output/audio")
+        if not audio_dir.exists():
+            return json.dumps({"error": "No audio files found"})
             
-        # TTSリクエストの作成
-        request = TTSRequest(text=text, voice=voice, speed=speed)
+        files = sorted(audio_dir.glob("*.wav"), key=lambda x: x.stat().st_mtime, reverse=True)
+        if not files:
+            return json.dumps({"error": "No audio files found"})
+            
+        with open(files[0], "rb") as f:
+            audio_data = base64.b64encode(f.read()).decode("utf-8")
+        return json.dumps({"audio": audio_data})
+    else:
+        raise ValueError(f"Unsupported URI scheme: {uri.scheme}")
+
+@server.list_tools()
+async def handle_list_tools() -> list[types.Tool]:
+    """
+    List available TTS tools.
+    """
+    return [
+        types.Tool(
+            name="text-to-speech",
+            description="Convert text to speech",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "voice": {"type": "string", "default": "jf_alpha"},
+                    "speed": {"type": "number", "default": 1.0},
+                },
+                "required": ["text"],
+            },
+        ),
+        types.Tool(
+            name="list-voices",
+            description="List available voices",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        )
+    ]
+
+@server.call_tool()
+async def handle_call_tool(
+    name: str, arguments: dict | None
+) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+    """
+    Handle tool execution requests.
+    """
+    if name == "text-to-speech":
+        if not arguments:
+            raise ValueError("Missing arguments")
+            
+        text = arguments.get("text")
+        voice = arguments.get("voice", "jf_alpha")
+        speed = arguments.get("speed", 1.0)
         
-        # 音声生成
+        if not validate_tts_arguments({"text": text, "voice": voice, "speed": speed}):
+            raise ValueError("Invalid arguments")
+            
+        request = TTSRequest(text=text, voice=voice, speed=speed)
         success, file_path = tts_service.generate(request)
         
         if success and file_path:
-            # 音声ファイルを読み込んでbase64エンコード
             with open(file_path, "rb") as f:
                 audio_data = base64.b64encode(f.read()).decode("utf-8")
-            return Image(audio_data)
+            return [types.ImageContent(type="image", data=audio_data)]
         else:
-            logger.error("音声生成に失敗しました")
-            return "Failed to generate audio"
-        
-    except Exception as e:
-        logger.error(f"音声生成エラー: {e}", exc_info=True)
-        return f"Error: {str(e)}"
-
-@mcp.tool()
-def list_voices() -> str:
-    """
-    利用可能な音声の一覧を取得する
-    
-    Returns:
-        str: 音声の一覧（JSON形式）
-    """
-    voices = list_available_voices()
-    return json.dumps({"voices": voices})
+            raise ValueError("Failed to generate audio")
+            
+    elif name == "list-voices":
+        voices = list_available_voices()
+        return [types.TextContent(type="text", text=json.dumps({"voices": voices}))]
+    else:
+        raise ValueError(f"Unknown tool: {name}")
 
 async def shutdown():
     """シャットダウン時の処理"""
@@ -166,23 +203,39 @@ async def shutdown():
 async def main():
     """メインの実行関数"""
     try:
-        print("=" * 50)
-        print("server.py: main関数が呼び出されました")
-        print("=" * 50)
+        print("=" * 50, file=sys.stderr)
+        print("server.py: main関数が呼び出されました", file=sys.stderr)
+        print("=" * 50, file=sys.stderr)
         
+        # Run the server using stdin/stdout streams
+        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                InitializationOptions(
+                    server_name="kokoro-mcp-server",
+                    server_version="0.1.0",
+                    capabilities=server.get_capabilities(
+                        notification_options=NotificationOptions(),
+                        experimental_capabilities={},
+                    ),
+                ),
+            )
+            
         # シグナルハンドラの設定
         for sig in (signal.SIGTERM, signal.SIGINT):
-            asyncio.get_event_loop().add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown()))
-            
-        print("MCPサーバーを起動します...")
-        print(f"サーバー名: {mcp.name}")
-        print(f"サポートされている音声: {list_available_voices()}")
-        print("MCPサーバーのインスタンスを返します")
-        return mcp
+            try:
+                asyncio.get_event_loop().add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown()))
+            except Exception as e:
+                print(f"シグナルハンドラの設定に失敗しました: {e}", file=sys.stderr)
+                
+        print("MCPサーバーを起動します...", file=sys.stderr)
+        return server
         
     except Exception as e:
-        print(f"サーバー初期化エラー: {e}")
-        print(f"詳細なエラー情報: {sys.exc_info()}")
+        print(f"サーバー初期化エラー: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         return None
 
 if __name__ == "__main__":
